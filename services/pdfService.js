@@ -12,9 +12,9 @@ export function generateOrderPdf(order) {
         margin: 40,
         size: 'A4',
         info: {
-          Title: `B'Smart Order Invoice - ${order.orderNumber || order.id}`,
+          Title: `B'Smart Order Receipt - ${order.orderNumber || order.id}`,
           Author: "B'Smart Dresses Bathinda",
-          Subject: 'School Uniform Order Invoice & Delivery Credentials',
+          Subject: 'School Uniform Order & Delivery Credentials',
         }
       });
 
@@ -56,14 +56,14 @@ export function generateOrderPdf(order) {
         .text("GSTIN: 03ANXPG2252L1ZS  |  Ph: +91 98765-43210", 40, y + 38)
         .text("#MCB-Z304654, Dr. Mela Ram Hospital Road, Amrik Singh Road, Bathinda (PB)", 40, y + 49);
 
-      // Invoice Badge on Top Right
+      // Order Receipt Badge on Top Right
       doc.rect(doc.page.width - 210, y - 5, 170, 65)
         .fillAndStroke(lightBg, tableBorder);
       
       doc.fillColor(primaryMaroon)
         .font('Helvetica-Bold')
         .fontSize(12)
-        .text("ORDER INVOICE", doc.page.width - 200, y + 2);
+        .text("ORDER RECEIPT", doc.page.width - 200, y + 2);
       
       doc.fillColor(darkText)
         .font('Helvetica-Bold')
@@ -107,8 +107,7 @@ export function generateOrderPdf(order) {
       doc.fillColor(darkText).font('Helvetica-Bold').fontSize(9).text(order.customerName || 'Customer', 50, y + 24);
       doc.font('Helvetica').fontSize(8.5).fillColor(grayText)
         .text(`Mobile: ${order.customerMobile || 'N/A'}`, 50, y + 38)
-        .text(`Email: ${order.customerEmail || 'N/A'}`, 50, y + 50)
-        .text(`School: ${order.school || 'General School'}`, 50, y + 62);
+        .text(`School: ${order.school || 'General School'}`, 50, y + 50);
 
       // Delivery Destination Block
       const rightCardX = 40 + cardWidth + 10;
@@ -222,19 +221,21 @@ export function generateOrderPdf(order) {
 
       y += 100;
 
-      // 6. Terms & Footer
-      doc.rect(40, y, doc.page.width - 80, 45).fillAndStroke(lightBg, tableBorder);
+      // 6. Terms & Conditions & Footer
+      doc.rect(40, y, doc.page.width - 80, 75).fillAndStroke(lightBg, tableBorder);
       doc.fillColor(grayText).font('Helvetica-Bold').fontSize(7.5)
-        .text("TERMS & INSTRUCTIONS:", 48, y + 6);
+        .text("TERMS & CONDITIONS:", 48, y + 6);
       doc.font('Helvetica').fontSize(7).fillColor(grayText)
-        .text("1. Size exchanges permitted within 7 days with original tags intact.", 48, y + 17)
-        .text("2. Please present this invoice receipt at the time of delivery verification.", 48, y + 27)
-        .text("3. High-durability stitching and color fastness guaranteed by B'Smart Dresses.", 48, y + 37);
+        .text("1. Any return or exchange of the product can be done within 7 days of purchase at our store.", 48, y + 17)
+        .text("2. Original receipt or invoice is required.", 48, y + 27)
+        .text("3. Clothes should be unworn, unwashed and with all original tags unbroken should be there in same condition.", 48, y + 37)
+        .text("4. No Guarantee No Claim on any product.", 48, y + 47)
+        .text("5. Subject to Bathinda Jurisdiction only.", 48, y + 57);
 
       // Bottom Bar
       doc.rect(0, doc.page.height - 15, doc.page.width, 15).fill(primaryMaroon);
       doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(7)
-        .text("B'SMART DRESSES BATHINDA  •  OFFICIAL INVOICE & ORDER DOCUMENTATION", 0, doc.page.height - 11, { align: 'center', width: doc.page.width });
+        .text("B'SMART DRESSES BATHINDA  •  OFFICIAL ORDER DOCUMENTATION", 0, doc.page.height - 11, { align: 'center', width: doc.page.width });
 
       doc.end();
     } catch (err) {
