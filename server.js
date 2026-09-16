@@ -103,14 +103,6 @@ app.post('/api/upload', async (req, res) => {
       secure: true
     });
 
-    // Automatic background transparency transformation for studio product photos
-    const transparentUrl = cloudinary.url(uploadResponse.public_id, {
-      effect: 'make_transparent:15',
-      fetch_format: 'png',
-      quality: 'auto',
-      secure: true
-    });
-
     const thumbnailUrl = cloudinary.url(uploadResponse.public_id, {
       width: 400,
       height: 400,
@@ -123,8 +115,8 @@ app.post('/api/upload', async (req, res) => {
 
     res.status(200).json({
       success: true,
-      url: transparentUrl || uploadResponse.secure_url,
-      optimizedUrl: transparentUrl || optimizedUrl,
+      url: uploadResponse.secure_url,
+      optimizedUrl: optimizedUrl,
       thumbnailUrl,
       public_id: uploadResponse.public_id,
       format: uploadResponse.format,
@@ -254,6 +246,14 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Missing required order fields: customerName, customerMobile, deliveryAddress, and items array are required.'
+      });
+    }
+
+    const calculatedSubtotal = Number(req.body.subtotal ?? items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0));
+    if (calculatedSubtotal < 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimum order amount is ₹500 to place an order. Delivery is free for all orders.'
       });
     }
 

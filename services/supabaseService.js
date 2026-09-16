@@ -8,12 +8,22 @@ const SEED_PRODUCTS = [];
 // Memory store initialized as empty array
 let memoryStore = [];
 
+function cleanImageUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  return url
+    .replace(/\/e_make_transparent:[^/]+\//g, '/f_auto,q_auto/')
+    .replace(/e_make_transparent:[0-9]+,?/g, '')
+    .replace(/upload\/f_png,q_auto\//g, 'upload/f_auto,q_auto/');
+}
+
 /**
  * Format DB row to Product Object
  */
 function mapFromDb(row) {
   if (!row) return null;
   const stock = Number(row.stock_quantity ?? row.stockQuantity ?? 50);
+  const rawImage = row.image_src || row.imageSrc || '';
+  const rawImages = row.images ? (typeof row.images === 'string' ? JSON.parse(row.images) : row.images) : [];
   return {
     id: row.id,
     name: row.name,
@@ -23,11 +33,12 @@ function mapFromDb(row) {
     description: row.description || row.details || '',
     details: row.description || row.details || '',
     basePrice: Number(row.base_price || row.basePrice || 500),
-    imageSrc: row.image_src || row.imageSrc || '',
-    images: row.images ? (typeof row.images === 'string' ? JSON.parse(row.images) : row.images) : [],
+    imageSrc: cleanImageUrl(rawImage),
+    images: (Array.isArray(rawImages) ? rawImages : [rawImage]).map(cleanImageUrl),
     sizes: row.sizes ? (typeof row.sizes === 'string' ? JSON.parse(row.sizes) : row.sizes) : ['28', '30', '32', '34', '36'],
     sizesText: row.sizes_text || row.sizesText || 'Multiple Sizes',
     sizePrices: row.size_prices ? (typeof row.size_prices === 'string' ? JSON.parse(row.size_prices) : row.size_prices) : {},
+    sizeStocks: row.size_stocks ? (typeof row.size_stocks === 'string' ? JSON.parse(row.size_stocks) : row.size_stocks) : (row.sizeStocks || {}),
     inStock: stock > 0 && row.in_stock !== false,
     stockQuantity: stock,
     createdAt: row.created_at || new Date().toISOString()
@@ -52,6 +63,7 @@ function mapToDb(product) {
     sizes: Array.isArray(product.sizes) ? product.sizes : ['28', '30', '32', '34', '36'],
     sizes_text: product.sizesText || (Array.isArray(product.sizes) ? `Sizes: ${product.sizes.join(', ')}` : 'Multiple Sizes'),
     size_prices: product.sizePrices || {},
+    size_stocks: product.sizeStocks || product.size_stocks || {},
     in_stock: stock > 0 && product.inStock !== false,
     stock_quantity: stock,
     created_at: product.createdAt || new Date().toISOString()
@@ -105,6 +117,7 @@ export async function addProductToSupabase(productData) {
     sizes: productData.sizes || ['28', '30', '32', '34', '36'],
     sizesText: productData.sizesText || (Array.isArray(productData.sizes) ? `Sizes: ${productData.sizes.join(', ')}` : 'Multiple Sizes'),
     sizePrices: productData.sizePrices || {},
+    sizeStocks: productData.sizeStocks || {},
     inStock: stock > 0,
     stockQuantity: stock,
     createdAt: new Date().toISOString()
@@ -151,6 +164,8 @@ export async function updateProductInSupabase(id, updateData) {
       inStock: newStock > 0,
       sizes: Array.isArray(updateData.sizes) ? updateData.sizes : existing.sizes,
       sizesText: updateData.sizesText || (Array.isArray(updateData.sizes) ? `Sizes: ${updateData.sizes.join(', ')}` : existing.sizesText),
+      sizePrices: updateData.sizePrices !== undefined ? updateData.sizePrices : existing.sizePrices,
+      sizeStocks: updateData.sizeStocks !== undefined ? updateData.sizeStocks : existing.sizeStocks,
     };
     memoryStore[index] = updatedItem;
   } else {

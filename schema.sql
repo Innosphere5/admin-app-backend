@@ -18,11 +18,15 @@ CREATE TABLE IF NOT EXISTS public.products (
     sizes JSONB DEFAULT '[]'::jsonb,
     sizes_text TEXT,
     size_prices JSONB DEFAULT '{}'::jsonb,
+    size_stocks JSONB DEFAULT '{}'::jsonb,
     in_stock BOOLEAN DEFAULT true,
     stock_quantity INTEGER DEFAULT 50,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure size_stocks column exists if table was already created earlier
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size_stocks JSONB DEFAULT '{}'::jsonb;
 
 -- 2. Enable Row Level Security (RLS) on products
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
@@ -120,8 +124,32 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
         CREATE PUBLICATION supabase_realtime;
     END IF;
-END $$;
 
-ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+    -- Add tables safely only if they are not already in the publication
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_rel pr
+        JOIN pg_class c ON pr.prrelid = c.oid
+        JOIN pg_publication p ON pr.prpubid = p.oid
+        WHERE p.pubname = 'supabase_realtime' AND c.relname = 'orders'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_rel pr
+        JOIN pg_class c ON pr.prrelid = c.oid
+        JOIN pg_publication p ON pr.prpubid = p.oid
+        WHERE p.pubname = 'supabase_realtime' AND c.relname = 'notifications'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_rel pr
+        JOIN pg_class c ON pr.prrelid = c.oid
+        JOIN pg_publication p ON pr.prpubid = p.oid
+        WHERE p.pubname = 'supabase_realtime' AND c.relname = 'products'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+    END IF;
+END $$;

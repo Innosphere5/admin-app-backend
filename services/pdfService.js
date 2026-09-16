@@ -53,7 +53,7 @@ export function generateOrderPdf(order) {
       doc.fillColor(grayText)
         .font('Helvetica')
         .fontSize(8)
-        .text("GSTIN: 03ANXPG2252L1ZS  |  Ph: +91 98765-43210", 40, y + 38)
+        .text("GSTIN: 03ANXPG2252L1ZS  |  Ph: +91 98883-88170", 40, y + 38)
         .text("#MCB-Z304654, Dr. Mela Ram Hospital Road, Amrik Singh Road, Bathinda (PB)", 40, y + 49);
 
       // Order Receipt Badge on Top Right

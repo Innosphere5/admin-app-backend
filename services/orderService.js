@@ -195,8 +195,9 @@ export async function createOrderInSupabase(orderData) {
   const orderNumber = orderData.orderNumber || `#${orderId.replace('-', '')}`;
   
   const subtotal = Number(orderData.subtotal ?? (orderData.items || []).reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0));
-  const deliveryFee = Number(orderData.deliveryFee ?? (subtotal >= 500 ? 0 : 50));
-  const totalAmount = Number(orderData.totalAmount ?? (subtotal + deliveryFee));
+  // Universal Free Delivery: delivery fee is always 0
+  const deliveryFee = 0;
+  const totalAmount = Number(orderData.totalAmount ?? subtotal);
   const itemsCount = (orderData.items || []).reduce((sum, item) => sum + Number(item.qty || 1), 0);
 
   const formattedOrder = {
