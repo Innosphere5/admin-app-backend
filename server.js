@@ -75,7 +75,11 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// POST /api/upload - Upload image to Cloudinary
+// In-memory store for custom created categories and schools
+let customCategories = new Set();
+let customSchools = new Set();
+
+// POST /api/upload - Upload image to Cloudinary with AI Background Removal
 app.post('/api/upload', async (req, res) => {
   try {
     const { image } = req.body;
@@ -84,21 +88,36 @@ app.post('/api/upload', async (req, res) => {
       return res.status(400).json({ success: false, message: 'No image data provided' });
     }
 
-    console.log('Uploading image to Cloudinary folder: bsmart_products...');
+    console.log('Uploading image to Cloudinary with AI Background Removal...');
 
-    const uploadResponse = await cloudinary.uploader.upload(image, {
-      folder: 'bsmart_products',
-      resource_type: 'auto',
-      transformation: [
-        { quality: 'auto', fetch_format: 'auto' }
-      ]
-    });
+    let uploadResponse;
+    let bgRemovalApplied = false;
 
-    console.log('Upload successful! Public ID:', uploadResponse.public_id);
+    // 1. Attempt upload with Cloudinary AI background removal
+    try {
+      uploadResponse = await cloudinary.uploader.upload(image, {
+        folder: 'bsmart_products',
+        resource_type: 'auto',
+        background_removal: 'cloudinary_ai',
+        format: 'png',
+      });
+      bgRemovalApplied = true;
+      console.log('AI Background Removal successful! Public ID:', uploadResponse.public_id);
+    } catch (bgErr) {
+      console.warn('AI Background Removal fallback triggered:', bgErr.message);
+      uploadResponse = await cloudinary.uploader.upload(image, {
+        folder: 'bsmart_products',
+        resource_type: 'auto',
+        transformation: [
+          { quality: 'auto', fetch_format: 'auto' }
+        ]
+      });
+    }
+
     console.log('Cloudinary Secure URL:', uploadResponse.secure_url);
 
     const optimizedUrl = cloudinary.url(uploadResponse.public_id, {
-      fetch_format: 'auto',
+      fetch_format: bgRemovalApplied ? 'png' : 'auto',
       quality: 'auto',
       secure: true
     });
@@ -108,7 +127,7 @@ app.post('/api/upload', async (req, res) => {
       height: 400,
       crop: 'fill',
       gravity: 'auto',
-      fetch_format: 'auto',
+      fetch_format: bgRemovalApplied ? 'png' : 'auto',
       quality: 'auto',
       secure: true
     });
@@ -122,7 +141,8 @@ app.post('/api/upload', async (req, res) => {
       format: uploadResponse.format,
       width: uploadResponse.width,
       height: uploadResponse.height,
-      bytes: uploadResponse.bytes
+      bytes: uploadResponse.bytes,
+      bgRemovalApplied
     });
 
   } catch (error) {
@@ -132,6 +152,92 @@ app.post('/api/upload', async (req, res) => {
       message: 'Failed to upload image to Cloudinary',
       error: error.message
     });
+  }
+});
+
+// GET /api/categories - Get all categories (seeded + from products + custom)
+app.get('/api/categories', async (req, res) => {
+  try {
+    const defaultCategories = [
+      'Shirt', 'Pant', 'Skirt', 'Skirt Divided', 'Socks', 'Tie', 'Belt',
+      'T.Shirt', 'Lower', 'Track Suit', 'Sweater', 'Pullover',
+      'Coat/Blazer', 'Jacket', 'Stocking', 'Shoes', 'Accessories'
+    ];
+    const catSet = new Set(defaultCategories);
+    customCategories.forEach((c) => catSet.add(c));
+    try {
+      const products = await getProductsFromSupabase();
+      products.forEach((p) => {
+        if (p.category && typeof p.category === 'string') {
+          catSet.add(p.category.trim());
+        }
+      });
+    } catch (e) {}
+    res.json({ success: true, categories: Array.from(catSet) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch categories' });
+  }
+});
+
+// POST /api/categories - Add a new custom category
+app.post('/api/categories', (req, res) => {
+  try {
+    const { category } = req.body;
+    if (!category || typeof category !== 'string' || !category.trim()) {
+      return res.status(400).json({ success: false, message: 'Category name is required' });
+    }
+    const cleanCat = category.trim();
+    customCategories.add(cleanCat);
+    res.status(201).json({ success: true, category: cleanCat });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to add category' });
+  }
+});
+
+// GET /api/schools - Get all schools (seeded + from products + custom)
+app.get('/api/schools', async (req, res) => {
+  try {
+    const defaultSchools = [
+      'Delhi Public School, Bathinda',
+      'St. Xavier School, Bathinda',
+      'St. Joseph School, Bathinda',
+      'Silver Oaks School, Bathinda',
+      'Silver Oaks Global School, Bathinda',
+      "St. Paul's School, Bathinda",
+      'Xavier World School, Bathinda',
+      'St. Kabir Convent School, Bhuchoo Khurd',
+      'St. Kabir Convent School, Model Town Branch',
+      'The Sanskaar School, Talwandi Sabo',
+      'DAV Public School, Bathinda',
+    ];
+    const schoolSet = new Set(defaultSchools);
+    customSchools.forEach((s) => schoolSet.add(s));
+    try {
+      const products = await getProductsFromSupabase();
+      products.forEach((p) => {
+        if (p.school && typeof p.school === 'string' && p.school !== 'General School') {
+          schoolSet.add(p.school.trim());
+        }
+      });
+    } catch (e) {}
+    res.json({ success: true, schools: Array.from(schoolSet) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch schools' });
+  }
+});
+
+// POST /api/schools - Add a new school
+app.post('/api/schools', (req, res) => {
+  try {
+    const { school } = req.body;
+    if (!school || typeof school !== 'string' || !school.trim()) {
+      return res.status(400).json({ success: false, message: 'School name is required' });
+    }
+    const cleanSchool = school.trim();
+    customSchools.add(cleanSchool);
+    res.status(201).json({ success: true, school: cleanSchool });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to add school' });
   }
 });
 

@@ -10,10 +10,19 @@ let memoryStore = [];
 
 function cleanImageUrl(url) {
   if (!url || typeof url !== 'string') return url;
-  return url
-    .replace(/\/e_make_transparent:[^/]+\//g, '/f_auto,q_auto/')
-    .replace(/e_make_transparent:[0-9]+,?/g, '')
-    .replace(/upload\/f_png,q_auto\//g, 'upload/f_auto,q_auto/');
+  let cleaned = url
+    .replace(/\/e_make_transparent:[^/]+\//g, '/')
+    .replace(/e_make_transparent:[0-9]+,?/g, '');
+
+  if (cleaned.includes('cloudinary.com') && cleaned.includes('/upload/')) {
+    if (!cleaned.includes('e_background_removal')) {
+      cleaned = cleaned.replace(
+        /\/upload\/(?:[a-zA-Z0-9_:,]+\/)?/,
+        '/upload/e_background_removal,f_png,q_auto/'
+      );
+    }
+  }
+  return cleaned;
 }
 
 /**
