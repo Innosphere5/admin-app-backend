@@ -255,3 +255,115 @@ export async function clearAllProductsFromSupabase() {
   }
   return true;
 }
+
+/**
+ * Rename category across all products in Supabase and memory store
+ */
+export async function renameCategoryInProducts(oldName, newName) {
+  memoryStore.forEach((p) => {
+    if (p.category && p.category.toLowerCase() === oldName.toLowerCase()) {
+      p.category = newName;
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ category: newName })
+      .ilike('category', oldName)
+      .select('id, name, category');
+
+    if (error) {
+      console.warn('Supabase renameCategory notice:', error.message);
+    } else {
+      console.log(`Updated ${data?.length || 0} products from category "${oldName}" to "${newName}"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('renameCategoryInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Reset deleted category to 'General' across all products in Supabase and memory store
+ */
+export async function deleteCategoryInProducts(catName) {
+  memoryStore.forEach((p) => {
+    if (p.category && p.category.toLowerCase() === catName.toLowerCase()) {
+      p.category = 'General';
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ category: 'General' })
+      .ilike('category', catName)
+      .select('id, name');
+
+    if (error) {
+      console.warn('Supabase deleteCategory notice:', error.message);
+    } else {
+      console.log(`Reset ${data?.length || 0} products from deleted category "${catName}" to "General"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('deleteCategoryInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Rename school across all products in Supabase and memory store
+ */
+export async function renameSchoolInProducts(oldName, newName) {
+  memoryStore.forEach((p) => {
+    if (p.school && p.school.toLowerCase() === oldName.toLowerCase()) {
+      p.school = newName;
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ school: newName })
+      .ilike('school', oldName)
+      .select('id, name, school');
+
+    if (error) {
+      console.warn('Supabase renameSchool notice:', error.message);
+    } else {
+      console.log(`Updated ${data?.length || 0} products from school "${oldName}" to "${newName}"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('renameSchoolInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Reset deleted school to 'General School' across all products in Supabase and memory store
+ */
+export async function deleteSchoolInProducts(schoolName) {
+  memoryStore.forEach((p) => {
+    if (p.school && p.school.toLowerCase() === schoolName.toLowerCase()) {
+      p.school = 'General School';
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ school: 'General School' })
+      .ilike('school', schoolName)
+      .select('id, name');
+
+    if (error) {
+      console.warn('Supabase deleteSchool notice:', error.message);
+    } else {
+      console.log(`Reset ${data?.length || 0} products from deleted school "${schoolName}" to "General School"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('deleteSchoolInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}

@@ -23,6 +23,16 @@ import {
   registerSseClient
 } from './services/notificationService.js';
 import { generateOrderPdf } from './services/pdfService.js';
+import {
+  getCategories,
+  addCategory,
+  updateCategory,
+  deleteCategory,
+  getSchools,
+  addSchool,
+  updateSchool,
+  deleteSchool
+} from './services/masterService.js';
 
 dotenv.config();
 
@@ -155,94 +165,119 @@ app.post('/api/upload', async (req, res) => {
   }
 });
 
-// GET /api/categories - Get all categories (seeded + from products + custom)
+// ========================================================
+// CATEGORIES CRUD API (Persistent & Supabase Synchronized)
+// ========================================================
+
+// GET /api/categories - Read all categories
 app.get('/api/categories', async (req, res) => {
   try {
-    const defaultCategories = [
-      'Shirt', 'Pant', 'Skirt', 'Skirt Divided', 'Socks', 'Tie', 'Belt',
-      'T.Shirt', 'Lower', 'Track Suit', 'Sweater', 'Pullover',
-      'Coat/Blazer', 'Jacket', 'Stocking', 'Shoes', 'Accessories'
-    ];
-    const catSet = new Set(defaultCategories);
-    customCategories.forEach((c) => catSet.add(c));
-    try {
-      const products = await getProductsFromSupabase();
-      products.forEach((p) => {
-        if (p.category && typeof p.category === 'string') {
-          const c = p.category.trim();
-          const lower = c.toLowerCase();
-          if (lower.includes('accessories') && (lower.includes('tie') || lower.includes('belt'))) {
-            return;
-          }
-          catSet.add(c);
-        }
-      });
-    } catch (e) {}
-    res.json({ success: true, categories: Array.from(catSet) });
+    const categories = await getCategories();
+    res.json({ success: true, count: categories.length, categories });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to fetch categories' });
+    res.status(500).json({ success: false, message: error.message || 'Failed to fetch categories' });
   }
 });
 
-// POST /api/categories - Add a new custom category
-app.post('/api/categories', (req, res) => {
+// POST /api/categories - Create / Add a new category
+app.post('/api/categories', async (req, res) => {
   try {
-    const { category } = req.body;
-    if (!category || typeof category !== 'string' || !category.trim()) {
+    const { category, name } = req.body;
+    const catName = category || name;
+    if (!catName || typeof catName !== 'string' || !catName.trim()) {
       return res.status(400).json({ success: false, message: 'Category name is required' });
     }
-    const cleanCat = category.trim();
-    customCategories.add(cleanCat);
-    res.status(201).json({ success: true, category: cleanCat });
+    const created = await addCategory(catName.trim());
+    res.status(201).json({ success: true, category: created });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to add category' });
+    res.status(500).json({ success: false, message: error.message || 'Failed to add category' });
   }
 });
 
-// GET /api/schools - Get all schools (seeded + from products + custom)
+// PUT /api/categories/:name - Update / Edit / Rename an existing category
+app.put('/api/categories/:name', async (req, res) => {
+  try {
+    const oldName = decodeURIComponent(req.params.name);
+    const { newName, newCategory, category } = req.body;
+    const targetNewName = (newName || newCategory || category || '').trim();
+
+    if (!targetNewName) {
+      return res.status(400).json({ success: false, message: 'New category name is required' });
+    }
+
+    const result = await updateCategory(oldName, targetNewName);
+    res.json({ success: true, message: `Category renamed successfully from "${oldName}" to "${targetNewName}"`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to update category' });
+  }
+});
+
+// DELETE /api/categories/:name - Delete a category
+app.delete('/api/categories/:name', async (req, res) => {
+  try {
+    const catName = decodeURIComponent(req.params.name);
+    const result = await deleteCategory(catName);
+    res.json({ success: true, message: `Category "${catName}" deleted successfully`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to delete category' });
+  }
+});
+
+// ========================================================
+// SCHOOLS CRUD API (Persistent & Supabase Synchronized)
+// ========================================================
+
+// GET /api/schools - Read all schools
 app.get('/api/schools', async (req, res) => {
   try {
-    const defaultSchools = [
-      'Delhi Public School, Bathinda',
-      'St. Xavier School, Bathinda',
-      'St. Joseph School, Bathinda',
-      'Silver Oaks School, Bathinda',
-      'Silver Oaks Global School, Bathinda',
-      "St. Paul's School, Bathinda",
-      'Xavier World School, Bathinda',
-      'St. Kabir Convent School, Bhuchoo Khurd',
-      'St. Kabir Convent School, Model Town Branch',
-      'The Sanskaar School, Talwandi Sabo',
-      'DAV Public School, Bathinda',
-    ];
-    const schoolSet = new Set(defaultSchools);
-    customSchools.forEach((s) => schoolSet.add(s));
-    try {
-      const products = await getProductsFromSupabase();
-      products.forEach((p) => {
-        if (p.school && typeof p.school === 'string' && p.school !== 'General School') {
-          schoolSet.add(p.school.trim());
-        }
-      });
-    } catch (e) {}
-    res.json({ success: true, schools: Array.from(schoolSet) });
+    const schools = await getSchools();
+    res.json({ success: true, count: schools.length, schools });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to fetch schools' });
+    res.status(500).json({ success: false, message: error.message || 'Failed to fetch schools' });
   }
 });
 
-// POST /api/schools - Add a new school
-app.post('/api/schools', (req, res) => {
+// POST /api/schools - Create / Add a new school
+app.post('/api/schools', async (req, res) => {
   try {
-    const { school } = req.body;
-    if (!school || typeof school !== 'string' || !school.trim()) {
+    const { school, name } = req.body;
+    const schoolName = school || name;
+    if (!schoolName || typeof schoolName !== 'string' || !schoolName.trim()) {
       return res.status(400).json({ success: false, message: 'School name is required' });
     }
-    const cleanSchool = school.trim();
-    customSchools.add(cleanSchool);
-    res.status(201).json({ success: true, school: cleanSchool });
+    const created = await addSchool(schoolName.trim());
+    res.status(201).json({ success: true, school: created });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to add school' });
+    res.status(500).json({ success: false, message: error.message || 'Failed to add school' });
+  }
+});
+
+// PUT /api/schools/:name - Update / Edit / Rename an existing school
+app.put('/api/schools/:name', async (req, res) => {
+  try {
+    const oldName = decodeURIComponent(req.params.name);
+    const { newName, newSchool, school } = req.body;
+    const targetNewName = (newName || newSchool || school || '').trim();
+
+    if (!targetNewName) {
+      return res.status(400).json({ success: false, message: 'New school name is required' });
+    }
+
+    const result = await updateSchool(oldName, targetNewName);
+    res.json({ success: true, message: `School renamed successfully from "${oldName}" to "${targetNewName}"`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to update school' });
+  }
+});
+
+// DELETE /api/schools/:name - Delete a school
+app.delete('/api/schools/:name', async (req, res) => {
+  try {
+    const schoolName = decodeURIComponent(req.params.name);
+    const result = await deleteSchool(schoolName);
+    res.json({ success: true, message: `School "${schoolName}" deleted successfully`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to delete school' });
   }
 });
 
