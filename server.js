@@ -169,7 +169,12 @@ app.get('/api/categories', async (req, res) => {
       const products = await getProductsFromSupabase();
       products.forEach((p) => {
         if (p.category && typeof p.category === 'string') {
-          catSet.add(p.category.trim());
+          const c = p.category.trim();
+          const lower = c.toLowerCase();
+          if (lower.includes('accessories') && (lower.includes('tie') || lower.includes('belt'))) {
+            return;
+          }
+          catSet.add(c);
         }
       });
     } catch (e) {}

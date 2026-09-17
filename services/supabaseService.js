@@ -33,10 +33,19 @@ function mapFromDb(row) {
   const stock = Number(row.stock_quantity ?? row.stockQuantity ?? 50);
   const rawImage = row.image_src || row.imageSrc || '';
   const rawImages = row.images ? (typeof row.images === 'string' ? JSON.parse(row.images) : row.images) : [];
+  let category = row.category || 'General';
+  const lowerCat = category.toLowerCase();
+  const lowerName = (row.name || '').toLowerCase();
+  if (lowerCat.includes('accessories') && (lowerCat.includes('tie') || lowerCat.includes('belt'))) {
+    if (lowerName.includes('tie')) category = 'Tie';
+    else if (lowerName.includes('belt')) category = 'Belt';
+    else category = 'Accessories';
+  }
+
   return {
     id: row.id,
     name: row.name,
-    category: row.category,
+    category,
     school: row.school,
     applicableClass: row.applicable_class || row.applicableClass || '',
     description: row.description || row.details || '',
@@ -59,10 +68,19 @@ function mapFromDb(row) {
  */
 function mapToDb(product) {
   const stock = Number(product.stockQuantity ?? product.stock_quantity ?? 50);
+  let category = product.category || 'General';
+  const lowerCat = category.toLowerCase();
+  const lowerName = (product.name || '').toLowerCase();
+  if (lowerCat.includes('accessories') && (lowerCat.includes('tie') || lowerCat.includes('belt'))) {
+    if (lowerName.includes('tie')) category = 'Tie';
+    else if (lowerName.includes('belt')) category = 'Belt';
+    else category = 'Accessories';
+  }
+
   return {
     id: String(product.id),
     name: product.name,
-    category: product.category || 'General',
+    category,
     school: product.school || 'General School',
     applicable_class: product.applicableClass || '',
     description: product.description || product.details || '',
