@@ -159,7 +159,56 @@ function mapToDb(order) {
 }
 
 /**
- * Fetch all orders from Supabase & fallback
+ * Helper to assign sequential series numbers (1, 2, 3...) chronologically
+ */
+function applySequentialSeries(orders) {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  
+  // Sort oldest first to assign chronological series numbers 1, 2, 3...
+  const sortedChronological = [...orders].sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeA - timeB;
+  });
+
+  const seriesMap = new Map();
+  sortedChronological.forEach((o, index) => {
+    const seriesNo = index + 1;
+    seriesMap.set(String(o.id), seriesNo);
+  });
+
+  // Return original ordering (newest first) with sequential series number assigned
+  return orders.map((o) => {
+    const seriesNo = seriesMap.get(String(o.id)) || 1;
+    // Always show clean sequential series orderNumber like #1, #2, #3
+    const sequentialOrderNumber = `#${seriesNo}`;
+    return {
+      ...o,
+      seriesNo,
+      orderNumber: sequentialOrderNumber,
+      rawOrderNumber: o.orderNumber || o.id
+    };
+  });
+}
+
+/**
+ * Get next sequential series number
+ */
+async function getNextSequenceNumber() {
+  try {
+    const { data } = await supabase
+      .from(TABLE_NAME)
+      .select('id, created_at');
+    
+    const count = (data && data.length > 0) ? data.length : ordersStore.length;
+    return count + 1;
+  } catch (e) {
+    return ordersStore.length + 1;
+  }
+}
+
+/**
+ * Fetch all orders from Supabase & fallback with sequential series numbers
  */
 export async function getOrdersFromSupabase() {
   try {
@@ -170,29 +219,40 @@ export async function getOrdersFromSupabase() {
 
     if (!error && data && data.length > 0) {
       const formatted = data.map(mapFromDb).filter(Boolean);
-      ordersStore = formatted;
-      return formatted;
+      const sequenced = applySequentialSeries(formatted);
+      ordersStore = sequenced;
+      return sequenced;
     }
   } catch (err) {
     // Suppress schema cache warning gracefully
   }
-  return ordersStore;
+  const sequencedFallback = applySequentialSeries(ordersStore);
+  ordersStore = sequencedFallback;
+  return sequencedFallback;
 }
 
 /**
- * Get order by ID
+ * Get order by ID or sequential number
  */
 export async function getOrderByIdFromSupabase(id) {
   const all = await getOrdersFromSupabase();
-  return all.find((o) => String(o.id) === String(id) || String(o.orderNumber) === String(id)) || null;
+  const searchKey = String(id).trim().replace('#', '').toLowerCase();
+  return all.find((o) => 
+    String(o.id).toLowerCase() === searchKey ||
+    String(o.id).toLowerCase() === `bs-${searchKey}` ||
+    String(o.orderNumber).replace('#', '').toLowerCase() === searchKey ||
+    String(o.seriesNo) === searchKey ||
+    String(o.rawOrderNumber || '').replace('#', '').toLowerCase() === searchKey
+  ) || null;
 }
 
 /**
- * Create a new order in Supabase & memory store + trigger real-time events
+ * Create a new order in Supabase & memory store with sequential order number
  */
 export async function createOrderInSupabase(orderData) {
-  const orderId = orderData.id || `BS-${Math.floor(1000 + Math.random() * 9000)}`;
-  const orderNumber = orderData.orderNumber || `#${orderId.replace('-', '')}`;
+  const nextSeq = await getNextSequenceNumber();
+  const orderId = orderData.id || `BS-${nextSeq}`;
+  const orderNumber = `#${nextSeq}`;
   
   const subtotal = Number(orderData.subtotal ?? (orderData.items || []).reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0));
   // Universal Free Delivery: delivery fee is always 0
@@ -202,7 +262,9 @@ export async function createOrderInSupabase(orderData) {
 
   const formattedOrder = {
     id: orderId,
+    seriesNo: nextSeq,
     orderNumber,
+    rawOrderNumber: orderNumber,
     customerName: orderData.customerName || 'Customer',
     customerMobile: orderData.customerMobile || '',
     customerEmail: orderData.customerEmail || '',
@@ -250,6 +312,64 @@ export async function createOrderInSupabase(orderData) {
   }
 
   return formattedOrder;
+}
+
+/**
+ * Permanently delete order from Supabase & memory store
+ */
+export async function deleteOrderFromSupabase(id) {
+  if (!id) {
+    throw new Error('Order ID is required to delete order');
+  }
+  const targetId = String(id).trim();
+  const searchKey = targetId.replace('#', '').toLowerCase();
+
+  // 1. Remove from in-memory ordersStore
+  const beforeLen = ordersStore.length;
+  ordersStore = ordersStore.filter(
+    (o) =>
+      String(o.id).toLowerCase() !== searchKey &&
+      String(o.id).toLowerCase() !== `bs-${searchKey}` &&
+      String(o.orderNumber).replace('#', '').toLowerCase() !== searchKey &&
+      String(o.seriesNo) !== searchKey &&
+      String(o.rawOrderNumber || '').replace('#', '').toLowerCase() !== searchKey
+  );
+
+  // Re-sequence remaining orders
+  ordersStore = applySequentialSeries(ordersStore);
+
+  // 2. Broadcast real-time order deletion to all connected SSE clients
+  broadcastRealtimeEvent('order_deleted', { id: targetId });
+
+  // 3. Delete from Supabase orders table
+  let dbDeleted = false;
+  try {
+    const { error: delErr } = await supabase
+      .from(TABLE_NAME)
+      .delete()
+      .or(`id.eq.${targetId},order_number.eq.${targetId},id.eq.BS-${targetId},order_number.eq.#${targetId}`);
+
+    if (delErr) {
+      console.warn('Supabase deleteOrder notice:', delErr.message);
+    } else {
+      dbDeleted = true;
+      console.log(`Order ${targetId} permanently deleted from Supabase DB`);
+    }
+  } catch (err) {
+    console.error('deleteOrderFromSupabase exception:', err.message);
+  }
+
+  // 4. Delete associated notifications
+  try {
+    await supabase.from('notifications').delete().eq('order_id', targetId);
+  } catch (e) {}
+
+  return {
+    success: true,
+    deletedId: targetId,
+    inMemoryDeleted: ordersStore.length < beforeLen,
+    dbDeleted
+  };
 }
 
 /**

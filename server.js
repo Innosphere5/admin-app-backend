@@ -13,7 +13,8 @@ import {
   getOrderByIdFromSupabase,
   createOrderInSupabase,
   updateOrderStatusInSupabase,
-  completeOrderByUser
+  completeOrderByUser,
+  deleteOrderFromSupabase
 } from './services/orderService.js';
 import {
   getNotificationsFromSupabase,
@@ -212,16 +213,27 @@ app.put('/api/categories/:name', async (req, res) => {
   }
 });
 
-// DELETE /api/categories/:name - Delete a category
-app.delete('/api/categories/:name', async (req, res) => {
+// DELETE /api/categories/:name or /api/categories - Delete a category
+const handleCategoryDelete = async (req, res) => {
   try {
-    const catName = decodeURIComponent(req.params.name);
+    let catName = req.params.name || req.body?.category || req.body?.name || req.query?.name;
+    if (catName) {
+      try {
+        catName = decodeURIComponent(catName);
+      } catch (e) {}
+      catName = catName.trim();
+    }
+    if (!catName) {
+      return res.status(400).json({ success: false, message: 'Category name is required to delete' });
+    }
     const result = await deleteCategory(catName);
     res.json({ success: true, message: `Category "${catName}" deleted successfully`, ...result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message || 'Failed to delete category' });
   }
-});
+};
+app.delete('/api/categories/:name', handleCategoryDelete);
+app.delete('/api/categories', handleCategoryDelete);
 
 // ========================================================
 // SCHOOLS CRUD API (Persistent & Supabase Synchronized)
@@ -255,7 +267,10 @@ app.post('/api/schools', async (req, res) => {
 // PUT /api/schools/:name - Update / Edit / Rename an existing school
 app.put('/api/schools/:name', async (req, res) => {
   try {
-    const oldName = decodeURIComponent(req.params.name);
+    let oldName = req.params.name;
+    try {
+      oldName = decodeURIComponent(oldName);
+    } catch (e) {}
     const { newName, newSchool, school } = req.body;
     const targetNewName = (newName || newSchool || school || '').trim();
 
@@ -270,16 +285,27 @@ app.put('/api/schools/:name', async (req, res) => {
   }
 });
 
-// DELETE /api/schools/:name - Delete a school
-app.delete('/api/schools/:name', async (req, res) => {
+// DELETE /api/schools/:name or /api/schools - Delete a school
+const handleSchoolDelete = async (req, res) => {
   try {
-    const schoolName = decodeURIComponent(req.params.name);
+    let schoolName = req.params.name || req.body?.school || req.body?.name || req.query?.name;
+    if (schoolName) {
+      try {
+        schoolName = decodeURIComponent(schoolName);
+      } catch (e) {}
+      schoolName = schoolName.trim();
+    }
+    if (!schoolName) {
+      return res.status(400).json({ success: false, message: 'School name is required to delete' });
+    }
     const result = await deleteSchool(schoolName);
     res.json({ success: true, message: `School "${schoolName}" deleted successfully`, ...result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message || 'Failed to delete school' });
   }
-});
+};
+app.delete('/api/schools/:name', handleSchoolDelete);
+app.delete('/api/schools', handleSchoolDelete);
 
 // GET /api/products - Get all products from Supabase DB
 app.get('/api/products', async (req, res) => {
@@ -483,6 +509,38 @@ app.put('/api/orders/:id/complete', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to complete order' });
   }
 });
+
+// DELETE /api/orders/:id or /api/orders - Admin delete order
+const handleOrderDelete = async (req, res) => {
+  try {
+    let orderId = req.params.id || req.body?.id || req.body?.orderId || req.query?.id;
+    if (orderId) {
+      try {
+        orderId = decodeURIComponent(orderId);
+      } catch (e) {}
+      orderId = orderId.trim();
+    }
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID is required to delete order' });
+    }
+
+    const result = await deleteOrderFromSupabase(orderId);
+    console.log(`🗑️ Admin deleted order ${orderId} successfully.`);
+
+    res.json({
+      success: true,
+      message: `Order ${orderId} has been permanently deleted`,
+      ...result
+    });
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to delete order' });
+  }
+};
+app.delete('/api/orders/:id', handleOrderDelete);
+app.delete('/api/orders', handleOrderDelete);
+app.post('/api/orders/:id/delete', handleOrderDelete);
+app.post('/api/orders/delete', handleOrderDelete);
 
 // ==========================================
 // REAL-TIME EVENT STREAM (Server-Sent Events)
