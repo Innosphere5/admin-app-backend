@@ -32,7 +32,11 @@ import {
   getSchools,
   addSchool,
   updateSchool,
-  deleteSchool
+  deleteSchool,
+  getClasses,
+  addClass,
+  updateClass,
+  deleteClass
 } from './services/masterService.js';
 
 dotenv.config();
@@ -306,6 +310,78 @@ const handleSchoolDelete = async (req, res) => {
 };
 app.delete('/api/schools/:name', handleSchoolDelete);
 app.delete('/api/schools', handleSchoolDelete);
+
+// ========================================================
+// CLASSES CRUD API (Persistent & Supabase Synchronized)
+// ========================================================
+
+// GET /api/classes - Read all classes
+app.get('/api/classes', async (req, res) => {
+  try {
+    const classes = await getClasses();
+    res.json({ success: true, count: classes.length, classes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to fetch classes' });
+  }
+});
+
+// POST /api/classes - Create / Add a new class
+app.post('/api/classes', async (req, res) => {
+  try {
+    const { className, name, classGroup } = req.body;
+    const targetName = className || name || classGroup;
+    if (!targetName || typeof targetName !== 'string' || !targetName.trim()) {
+      return res.status(400).json({ success: false, message: 'Class name is required' });
+    }
+    const created = await addClass(targetName.trim());
+    res.status(201).json({ success: true, className: created, class: created });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to add class' });
+  }
+});
+
+// PUT /api/classes/:name - Update / Edit / Rename an existing class
+app.put('/api/classes/:name', async (req, res) => {
+  try {
+    let oldName = req.params.name;
+    try {
+      oldName = decodeURIComponent(oldName);
+    } catch (e) {}
+    const { newName, newClass, className } = req.body;
+    const targetNewName = (newName || newClass || className || '').trim();
+
+    if (!targetNewName) {
+      return res.status(400).json({ success: false, message: 'New class name is required' });
+    }
+
+    const result = await updateClass(oldName, targetNewName);
+    res.json({ success: true, message: `Class renamed successfully from "${oldName}" to "${targetNewName}"`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to update class' });
+  }
+});
+
+// DELETE /api/classes/:name or /api/classes - Delete a class
+const handleClassDelete = async (req, res) => {
+  try {
+    let clsName = req.params.name || req.body?.className || req.body?.name || req.query?.name;
+    if (clsName) {
+      try {
+        clsName = decodeURIComponent(clsName);
+      } catch (e) {}
+      clsName = clsName.trim();
+    }
+    if (!clsName) {
+      return res.status(400).json({ success: false, message: 'Class name is required to delete' });
+    }
+    const result = await deleteClass(clsName);
+    res.json({ success: true, message: `Class "${clsName}" deleted successfully`, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to delete class' });
+  }
+};
+app.delete('/api/classes/:name', handleClassDelete);
+app.delete('/api/classes', handleClassDelete);
 
 // GET /api/products - Get all products from Supabase DB
 app.get('/api/products', async (req, res) => {

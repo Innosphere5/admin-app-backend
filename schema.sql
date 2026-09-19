@@ -153,3 +153,38 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
     END IF;
 END $$;
+
+-- 12. Create optional Master Tables (schools, categories, classes)
+CREATE TABLE IF NOT EXISTS public.schools (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.schools ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read schools" ON public.schools;
+CREATE POLICY "Allow public read schools" ON public.schools FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow public all schools" ON public.schools;
+CREATE POLICY "Allow public all schools" ON public.schools FOR ALL USING (true);
+
+CREATE TABLE IF NOT EXISTS public.categories (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read categories" ON public.categories;
+CREATE POLICY "Allow public read categories" ON public.categories FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow public all categories" ON public.categories;
+CREATE POLICY "Allow public all categories" ON public.categories FOR ALL USING (true);
+
+CREATE TABLE IF NOT EXISTS public.classes (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read classes" ON public.classes;
+CREATE POLICY "Allow public read classes" ON public.classes FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow public all classes" ON public.classes;
+CREATE POLICY "Allow public all classes" ON public.classes FOR ALL USING (true);
+

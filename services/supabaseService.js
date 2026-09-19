@@ -367,3 +367,60 @@ export async function deleteSchoolInProducts(schoolName) {
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * Rename class across all products in Supabase and memory store
+ */
+export async function renameClassInProducts(oldName, newName) {
+  memoryStore.forEach((p) => {
+    if (p.applicableClass && p.applicableClass.toLowerCase() === oldName.toLowerCase()) {
+      p.applicableClass = newName;
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ applicable_class: newName })
+      .ilike('applicable_class', oldName)
+      .select('id, name, applicable_class');
+
+    if (error) {
+      console.warn('Supabase renameClass notice:', error.message);
+    } else {
+      console.log(`Updated ${data?.length || 0} products from class "${oldName}" to "${newName}"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('renameClassInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Reset deleted class to 'All Classes' across all products in Supabase and memory store
+ */
+export async function deleteClassInProducts(className) {
+  memoryStore.forEach((p) => {
+    if (p.applicableClass && p.applicableClass.toLowerCase() === className.toLowerCase()) {
+      p.applicableClass = 'All Classes';
+    }
+  });
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .update({ applicable_class: 'All Classes' })
+      .ilike('applicable_class', className)
+      .select('id, name');
+
+    if (error) {
+      console.warn('Supabase deleteClass notice:', error.message);
+    } else {
+      console.log(`Reset ${data?.length || 0} products from deleted class "${className}" to "All Classes"`);
+    }
+    return { success: !error, updatedCount: data?.length || 0 };
+  } catch (err) {
+    console.error('deleteClassInProducts exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+

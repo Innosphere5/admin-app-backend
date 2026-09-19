@@ -6,6 +6,8 @@ import {
   deleteCategoryInProducts,
   renameSchoolInProducts,
   deleteSchoolInProducts,
+  renameClassInProducts,
+  deleteClassInProducts,
   getProductsFromSupabase
 } from './supabaseService.js';
 
@@ -15,8 +17,10 @@ const DATA_DIR = path.join(__dirname, '../data');
 
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const SCHOOLS_FILE = path.join(DATA_DIR, 'schools.json');
+const CLASSES_FILE = path.join(DATA_DIR, 'classes.json');
 const DELETED_CATEGORIES_FILE = path.join(DATA_DIR, 'deleted_categories.json');
 const DELETED_SCHOOLS_FILE = path.join(DATA_DIR, 'deleted_schools.json');
+const DELETED_CLASSES_FILE = path.join(DATA_DIR, 'deleted_classes.json');
 
 const DEFAULT_CATEGORIES = [
   'Shirt',
@@ -50,6 +54,23 @@ const DEFAULT_SCHOOLS = [
   'St. Kabir Convent School, Model Town Branch',
   'The Sanskaar School, Talwandi Sabo',
   'DAV Public School, Bathinda'
+];
+
+const DEFAULT_CLASSES = [
+  'NURSERY - KG',
+  'NUR - II',
+  'NUR - V',
+  'NUR - X',
+  'I - II',
+  'III - V',
+  'I - V',
+  'I - VIII',
+  'I - X',
+  'VI - VIII',
+  'VI - X',
+  'IX - X',
+  'XI - XII',
+  'All Classes'
 ];
 
 function ensureFile(filePath, defaultData) {
@@ -323,3 +344,126 @@ export async function deleteSchool(name) {
 
   return { deleted: cleanName };
 }
+
+// -------------------------------------------------------------
+// Class Master CRUD
+// -------------------------------------------------------------
+
+export async function getClasses() {
+  const fileClasses = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
+  const deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
+  const deletedSet = new Set(deletedClasses.map((c) => String(c).trim().toLowerCase()));
+
+  // Start with file classes that haven't been deleted
+  const classSet = new Set();
+  fileClasses.forEach((c) => {
+    if (c && typeof c === 'string') {
+      const trimmed = c.trim();
+      if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
+        classSet.add(trimmed);
+      }
+    }
+  });
+
+  try {
+    const products = await getProductsFromSupabase();
+    products.forEach((p) => {
+      const cls = p.applicableClass || p.applicable_class;
+      if (cls && typeof cls === 'string' && cls !== 'All Classes') {
+        const trimmed = cls.trim();
+        if (!deletedSet.has(trimmed.toLowerCase())) {
+          classSet.add(trimmed);
+        }
+      }
+    });
+  } catch (e) {}
+
+  const result = Array.from(classSet);
+  saveFile(CLASSES_FILE, result);
+  return result;
+}
+
+export async function addClass(name) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Valid class name is required');
+  }
+  const cleanName = name.trim();
+  const lowerClean = cleanName.toLowerCase();
+
+  // Remove from deleted blacklist if present
+  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
+  if (deletedClasses.some((c) => c.toLowerCase() === lowerClean)) {
+    deletedClasses = deletedClasses.filter((c) => c.toLowerCase() !== lowerClean);
+    saveFile(DELETED_CLASSES_FILE, deletedClasses);
+  }
+
+  const current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
+  if (!current.some((c) => c.toLowerCase() === lowerClean)) {
+    current.push(cleanName);
+    saveFile(CLASSES_FILE, current);
+  }
+  return cleanName;
+}
+
+export async function updateClass(oldName, newName) {
+  if (!oldName || !newName || !newName.trim()) {
+    throw new Error('Both old and new class names are required');
+  }
+  const cleanOld = oldName.trim();
+  const cleanNew = newName.trim();
+  const lowerOld = cleanOld.toLowerCase();
+  const lowerNew = cleanNew.toLowerCase();
+
+  // Remove new name from blacklist
+  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
+  if (deletedClasses.some((c) => c.toLowerCase() === lowerNew)) {
+    deletedClasses = deletedClasses.filter((c) => c.toLowerCase() !== lowerNew);
+    saveFile(DELETED_CLASSES_FILE, deletedClasses);
+  }
+
+  // Blacklist old name to avoid resurrection from products
+  if (!deletedClasses.some((c) => c.toLowerCase() === lowerOld)) {
+    deletedClasses.push(cleanOld);
+    saveFile(DELETED_CLASSES_FILE, deletedClasses);
+  }
+
+  let current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
+  current = current.filter((c) => c.toLowerCase() !== lowerOld);
+  if (!current.some((c) => c.toLowerCase() === lowerNew)) {
+    current.push(cleanNew);
+  }
+
+  const unique = Array.from(new Set(current));
+  saveFile(CLASSES_FILE, unique);
+
+  // Sync rename in Supabase products
+  await renameClassInProducts(cleanOld, cleanNew);
+
+  return { oldName: cleanOld, newName: cleanNew };
+}
+
+export async function deleteClass(name) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Class name is required');
+  }
+  const cleanName = name.trim();
+  const lowerClean = cleanName.toLowerCase();
+
+  // 1. Add to deleted blacklist so getClasses never restores it
+  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
+  if (!deletedClasses.some((c) => c.toLowerCase() === lowerClean)) {
+    deletedClasses.push(cleanName);
+    saveFile(DELETED_CLASSES_FILE, deletedClasses);
+  }
+
+  // 2. Remove from active classes file
+  let current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
+  current = current.filter((c) => c.toLowerCase() !== lowerClean);
+  saveFile(CLASSES_FILE, current);
+
+  // 3. Sync delete in Supabase products (reset to 'All Classes')
+  await deleteClassInProducts(cleanName);
+
+  return { deleted: cleanName };
+}
+
