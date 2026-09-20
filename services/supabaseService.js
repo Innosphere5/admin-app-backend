@@ -344,24 +344,48 @@ export async function renameSchoolInProducts(oldName, newName) {
  * Reset deleted school to 'General School' across all products in Supabase and memory store
  */
 export async function deleteSchoolInProducts(schoolName) {
+  if (!schoolName) return { success: true, updatedCount: 0 };
+  const cleanTarget = String(schoolName).trim().toLowerCase();
+
   memoryStore.forEach((p) => {
-    if (p.school && p.school.toLowerCase() === schoolName.toLowerCase()) {
+    if (p.school && p.school.trim().toLowerCase() === cleanTarget) {
       p.school = 'General School';
     }
   });
+
   try {
+    // 1. Direct case-insensitive match
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .update({ school: 'General School' })
-      .ilike('school', schoolName)
+      .ilike('school', schoolName.trim())
       .select('id, name');
+
+    let updatedCount = data?.length || 0;
+
+    // 2. Fetch all products to catch any with slight formatting variations (extra spaces)
+    const { data: allProds } = await supabase.from(TABLE_NAME).select('id, school');
+    if (Array.isArray(allProds)) {
+      const remainingIds = allProds
+        .filter((p) => p.school && p.school.trim().toLowerCase() === cleanTarget && p.school !== 'General School')
+        .map((p) => p.id);
+
+      if (remainingIds.length > 0) {
+        const { data: updatedRemaining } = await supabase
+          .from(TABLE_NAME)
+          .update({ school: 'General School' })
+          .in('id', remainingIds)
+          .select('id');
+        updatedCount += updatedRemaining?.length || 0;
+      }
+    }
 
     if (error) {
       console.warn('Supabase deleteSchool notice:', error.message);
     } else {
-      console.log(`Reset ${data?.length || 0} products from deleted school "${schoolName}" to "General School"`);
+      console.log(`Reset ${updatedCount} products from deleted school "${schoolName}" to "General School"`);
     }
-    return { success: !error, updatedCount: data?.length || 0 };
+    return { success: true, updatedCount };
   } catch (err) {
     console.error('deleteSchoolInProducts exception:', err.message);
     return { success: false, error: err.message };
@@ -372,24 +396,47 @@ export async function deleteSchoolInProducts(schoolName) {
  * Rename class across all products in Supabase and memory store
  */
 export async function renameClassInProducts(oldName, newName) {
+  if (!oldName || !newName) return { success: true, updatedCount: 0 };
+  const cleanOld = String(oldName).trim().toLowerCase();
+  const cleanNew = String(newName).trim();
+
   memoryStore.forEach((p) => {
-    if (p.applicableClass && p.applicableClass.toLowerCase() === oldName.toLowerCase()) {
-      p.applicableClass = newName;
+    if (p.applicableClass && p.applicableClass.trim().toLowerCase() === cleanOld) {
+      p.applicableClass = cleanNew;
     }
   });
+
   try {
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .update({ applicable_class: newName })
-      .ilike('applicable_class', oldName)
+      .update({ applicable_class: cleanNew })
+      .ilike('applicable_class', oldName.trim())
       .select('id, name, applicable_class');
+
+    let updatedCount = data?.length || 0;
+
+    const { data: allProds } = await supabase.from(TABLE_NAME).select('id, applicable_class');
+    if (Array.isArray(allProds)) {
+      const remainingIds = allProds
+        .filter((p) => p.applicable_class && p.applicable_class.trim().toLowerCase() === cleanOld && p.applicable_class !== cleanNew)
+        .map((p) => p.id);
+
+      if (remainingIds.length > 0) {
+        const { data: updatedRemaining } = await supabase
+          .from(TABLE_NAME)
+          .update({ applicable_class: cleanNew })
+          .in('id', remainingIds)
+          .select('id');
+        updatedCount += updatedRemaining?.length || 0;
+      }
+    }
 
     if (error) {
       console.warn('Supabase renameClass notice:', error.message);
     } else {
-      console.log(`Updated ${data?.length || 0} products from class "${oldName}" to "${newName}"`);
+      console.log(`Updated ${updatedCount} products from class "${oldName}" to "${cleanNew}"`);
     }
-    return { success: !error, updatedCount: data?.length || 0 };
+    return { success: !error, updatedCount };
   } catch (err) {
     console.error('renameClassInProducts exception:', err.message);
     return { success: false, error: err.message };
@@ -400,27 +447,107 @@ export async function renameClassInProducts(oldName, newName) {
  * Reset deleted class to 'All Classes' across all products in Supabase and memory store
  */
 export async function deleteClassInProducts(className) {
+  if (!className) return { success: true, updatedCount: 0 };
+  const cleanTarget = String(className).trim().toLowerCase();
+
   memoryStore.forEach((p) => {
-    if (p.applicableClass && p.applicableClass.toLowerCase() === className.toLowerCase()) {
+    if (p.applicableClass && p.applicableClass.trim().toLowerCase() === cleanTarget) {
       p.applicableClass = 'All Classes';
     }
   });
+
   try {
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .update({ applicable_class: 'All Classes' })
-      .ilike('applicable_class', className)
+      .ilike('applicable_class', className.trim())
       .select('id, name');
+
+    let updatedCount = data?.length || 0;
+
+    const { data: allProds } = await supabase.from(TABLE_NAME).select('id, applicable_class');
+    if (Array.isArray(allProds)) {
+      const remainingIds = allProds
+        .filter((p) => p.applicable_class && p.applicable_class.trim().toLowerCase() === cleanTarget && p.applicable_class !== 'All Classes')
+        .map((p) => p.id);
+
+      if (remainingIds.length > 0) {
+        const { data: updatedRemaining } = await supabase
+          .from(TABLE_NAME)
+          .update({ applicable_class: 'All Classes' })
+          .in('id', remainingIds)
+          .select('id');
+        updatedCount += updatedRemaining?.length || 0;
+      }
+    }
 
     if (error) {
       console.warn('Supabase deleteClass notice:', error.message);
     } else {
-      console.log(`Reset ${data?.length || 0} products from deleted class "${className}" to "All Classes"`);
+      console.log(`Reset ${updatedCount} products from deleted class "${className}" to "All Classes"`);
     }
-    return { success: !error, updatedCount: data?.length || 0 };
+    return { success: true, updatedCount };
   } catch (err) {
     console.error('deleteClassInProducts exception:', err.message);
     return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Retrieve master registry (schools, classes, categories, deletions) from Supabase persistent store
+ */
+export async function getMasterRegistryFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('message, created_at')
+      .eq('id', 'sys_master_registry')
+      .maybeSingle();
+
+    if (!error && data && data.message) {
+      const parsed = JSON.parse(data.message);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase getMasterRegistry notice:', err.message);
+  }
+  return null;
+}
+
+/**
+ * Persist master registry directly into Supabase (accessible across cloud, local dev, and web panel)
+ */
+export async function saveMasterRegistryToSupabase(registry) {
+  try {
+    const payload = {
+      id: 'sys_master_registry',
+      order_id: 'SYSTEM',
+      type: 'system_masters',
+      title: 'System Master Registry',
+      message: JSON.stringify({
+        ...registry,
+        updatedAt: new Date().toISOString()
+      }),
+      target_role: 'system',
+      read: true,
+      created_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('notifications')
+      .upsert([payload], { onConflict: 'id' });
+
+    if (error) {
+      console.warn('Supabase saveMasterRegistry notice:', error.message);
+      return false;
+    }
+    console.log('✅ Master registry successfully synced to Supabase database');
+    return true;
+  } catch (err) {
+    console.error('saveMasterRegistryToSupabase exception:', err.message);
+    return false;
   }
 }
 

@@ -8,7 +8,9 @@ import {
   deleteSchoolInProducts,
   renameClassInProducts,
   deleteClassInProducts,
-  getProductsFromSupabase
+  getProductsFromSupabase,
+  getMasterRegistryFromSupabase,
+  saveMasterRegistryToSupabase
 } from './supabaseService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,18 +104,81 @@ function saveFile(filePath, data) {
   }
 }
 
+/**
+ * Load full master state from Supabase (shared persistent store) with local file fallback
+ */
+async function getFullRegistry() {
+  const fileCategories = ensureFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
+  const fileSchools = ensureFile(SCHOOLS_FILE, DEFAULT_SCHOOLS);
+  const fileClasses = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
+  const fileDelCats = ensureFile(DELETED_CATEGORIES_FILE, []);
+  const fileDelSchools = ensureFile(DELETED_SCHOOLS_FILE, []);
+  const fileDelClasses = ensureFile(DELETED_CLASSES_FILE, []);
+
+  try {
+    const remote = await getMasterRegistryFromSupabase();
+    if (remote && Array.isArray(remote.schools) && Array.isArray(remote.classes)) {
+      // Sync to local files for secondary cache
+      saveFile(CATEGORIES_FILE, remote.categories || fileCategories);
+      saveFile(SCHOOLS_FILE, remote.schools || fileSchools);
+      saveFile(CLASSES_FILE, remote.classes || fileClasses);
+      saveFile(DELETED_CATEGORIES_FILE, remote.deletedCategories || fileDelCats);
+      saveFile(DELETED_SCHOOLS_FILE, remote.deletedSchools || fileDelSchools);
+      saveFile(DELETED_CLASSES_FILE, remote.deletedClasses || fileDelClasses);
+      return remote;
+    }
+  } catch (e) {
+    console.warn('Could not read master registry from Supabase:', e.message);
+  }
+
+  // Initialize Supabase registry from local files if not yet seeded
+  const initial = {
+    categories: fileCategories,
+    schools: fileSchools,
+    classes: fileClasses,
+    deletedCategories: fileDelCats,
+    deletedSchools: fileDelSchools,
+    deletedClasses: fileDelClasses,
+  };
+  await saveMasterRegistryToSupabase(initial);
+  return initial;
+}
+
+/**
+ * Save master state to both Supabase and local cache files
+ */
+async function syncRegistry(updated) {
+  const current = await getFullRegistry();
+  const merged = {
+    categories: updated.categories !== undefined ? updated.categories : (current.categories || []),
+    schools: updated.schools !== undefined ? updated.schools : (current.schools || []),
+    classes: updated.classes !== undefined ? updated.classes : (current.classes || []),
+    deletedCategories: updated.deletedCategories !== undefined ? updated.deletedCategories : (current.deletedCategories || []),
+    deletedSchools: updated.deletedSchools !== undefined ? updated.deletedSchools : (current.deletedSchools || []),
+    deletedClasses: updated.deletedClasses !== undefined ? updated.deletedClasses : (current.deletedClasses || []),
+  };
+
+  saveFile(CATEGORIES_FILE, merged.categories);
+  saveFile(SCHOOLS_FILE, merged.schools);
+  saveFile(CLASSES_FILE, merged.classes);
+  saveFile(DELETED_CATEGORIES_FILE, merged.deletedCategories);
+  saveFile(DELETED_SCHOOLS_FILE, merged.deletedSchools);
+  saveFile(DELETED_CLASSES_FILE, merged.deletedClasses);
+
+  await saveMasterRegistryToSupabase(merged);
+  return merged;
+}
+
 // -------------------------------------------------------------
 // Category Master CRUD
 // -------------------------------------------------------------
 
 export async function getCategories() {
-  const fileCategories = ensureFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
-  const deletedCats = ensureFile(DELETED_CATEGORIES_FILE, []);
-  const deletedSet = new Set(deletedCats.map((c) => String(c).trim().toLowerCase()));
+  const registry = await getFullRegistry();
+  const deletedSet = new Set((registry.deletedCategories || []).map((c) => String(c).trim().toLowerCase()));
 
-  // Start with file categories that haven't been deleted
   const catSet = new Set();
-  fileCategories.forEach((c) => {
+  (registry.categories || []).forEach((c) => {
     if (c && typeof c === 'string') {
       const trimmed = c.trim();
       if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
@@ -147,18 +212,12 @@ export async function addCategory(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // Remove from deleted blacklist if present
-  let deletedCats = ensureFile(DELETED_CATEGORIES_FILE, []);
-  if (deletedCats.some((c) => c.toLowerCase() === lowerClean)) {
-    deletedCats = deletedCats.filter((c) => c.toLowerCase() !== lowerClean);
-    saveFile(DELETED_CATEGORIES_FILE, deletedCats);
-  }
+  const registry = await getFullRegistry();
+  let deletedCats = (registry.deletedCategories || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
+  let cats = (registry.categories || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
+  cats.push(cleanName);
 
-  const current = ensureFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
-  if (!current.some((c) => c.toLowerCase() === lowerClean)) {
-    current.push(cleanName);
-    saveFile(CATEGORIES_FILE, current);
-  }
+  await syncRegistry({ categories: cats, deletedCategories: deletedCats });
   return cleanName;
 }
 
@@ -171,29 +230,18 @@ export async function updateCategory(oldName, newName) {
   const lowerOld = cleanOld.toLowerCase();
   const lowerNew = cleanNew.toLowerCase();
 
-  // Remove new name from blacklist
-  let deletedCats = ensureFile(DELETED_CATEGORIES_FILE, []);
-  if (deletedCats.some((c) => c.toLowerCase() === lowerNew)) {
-    deletedCats = deletedCats.filter((c) => c.toLowerCase() !== lowerNew);
-    saveFile(DELETED_CATEGORIES_FILE, deletedCats);
-  }
-
-  // Blacklist old name to avoid resurrection from products
-  if (!deletedCats.some((c) => c.toLowerCase() === lowerOld)) {
+  const registry = await getFullRegistry();
+  let deletedCats = (registry.deletedCategories || []).filter((c) => c.trim().toLowerCase() !== lowerNew);
+  if (!deletedCats.some((c) => c.trim().toLowerCase() === lowerOld)) {
     deletedCats.push(cleanOld);
-    saveFile(DELETED_CATEGORIES_FILE, deletedCats);
   }
 
-  let current = ensureFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
-  current = current.filter((c) => c.toLowerCase() !== lowerOld);
-  if (!current.some((c) => c.toLowerCase() === lowerNew)) {
-    current.push(cleanNew);
+  let cats = (registry.categories || []).filter((c) => c.trim().toLowerCase() !== lowerOld);
+  if (!cats.some((c) => c.trim().toLowerCase() === lowerNew)) {
+    cats.push(cleanNew);
   }
 
-  const unique = Array.from(new Set(current));
-  saveFile(CATEGORIES_FILE, unique);
-
-  // Sync rename in Supabase products
+  await syncRegistry({ categories: cats, deletedCategories: deletedCats });
   await renameCategoryInProducts(cleanOld, cleanNew);
 
   return { oldName: cleanOld, newName: cleanNew };
@@ -206,19 +254,15 @@ export async function deleteCategory(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // 1. Add to deleted blacklist so getCategories never restores it
-  let deletedCats = ensureFile(DELETED_CATEGORIES_FILE, []);
-  if (!deletedCats.some((c) => c.toLowerCase() === lowerClean)) {
+  const registry = await getFullRegistry();
+  let deletedCats = registry.deletedCategories || [];
+  if (!deletedCats.some((c) => c.trim().toLowerCase() === lowerClean)) {
     deletedCats.push(cleanName);
-    saveFile(DELETED_CATEGORIES_FILE, deletedCats);
   }
 
-  // 2. Remove from active categories file
-  let current = ensureFile(CATEGORIES_FILE, DEFAULT_CATEGORIES);
-  current = current.filter((c) => c.toLowerCase() !== lowerClean);
-  saveFile(CATEGORIES_FILE, current);
+  let cats = (registry.categories || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
 
-  // 3. Sync delete in Supabase products (reset to 'General')
+  await syncRegistry({ categories: cats, deletedCategories: deletedCats });
   await deleteCategoryInProducts(cleanName);
 
   return { deleted: cleanName };
@@ -229,13 +273,11 @@ export async function deleteCategory(name) {
 // -------------------------------------------------------------
 
 export async function getSchools() {
-  const fileSchools = ensureFile(SCHOOLS_FILE, DEFAULT_SCHOOLS);
-  const deletedSchools = ensureFile(DELETED_SCHOOLS_FILE, []);
-  const deletedSet = new Set(deletedSchools.map((s) => String(s).trim().toLowerCase()));
+  const registry = await getFullRegistry();
+  const deletedSet = new Set((registry.deletedSchools || []).map((s) => String(s).trim().toLowerCase()));
 
-  // Start with file schools that haven't been deleted
   const schoolSet = new Set();
-  fileSchools.forEach((s) => {
+  (registry.schools || []).forEach((s) => {
     if (s && typeof s === 'string') {
       const trimmed = s.trim();
       if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
@@ -243,18 +285,6 @@ export async function getSchools() {
       }
     }
   });
-
-  try {
-    const products = await getProductsFromSupabase();
-    products.forEach((p) => {
-      if (p.school && typeof p.school === 'string' && p.school !== 'General School') {
-        const trimmed = p.school.trim();
-        if (!deletedSet.has(trimmed.toLowerCase())) {
-          schoolSet.add(trimmed);
-        }
-      }
-    });
-  } catch (e) {}
 
   const result = Array.from(schoolSet);
   saveFile(SCHOOLS_FILE, result);
@@ -268,18 +298,12 @@ export async function addSchool(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // Remove from deleted blacklist if present
-  let deletedSchools = ensureFile(DELETED_SCHOOLS_FILE, []);
-  if (deletedSchools.some((s) => s.toLowerCase() === lowerClean)) {
-    deletedSchools = deletedSchools.filter((s) => s.toLowerCase() !== lowerClean);
-    saveFile(DELETED_SCHOOLS_FILE, deletedSchools);
-  }
+  const registry = await getFullRegistry();
+  let deletedSchools = (registry.deletedSchools || []).filter((s) => s.trim().toLowerCase() !== lowerClean);
+  let schools = (registry.schools || []).filter((s) => s.trim().toLowerCase() !== lowerClean);
+  schools.push(cleanName);
 
-  const current = ensureFile(SCHOOLS_FILE, DEFAULT_SCHOOLS);
-  if (!current.some((s) => s.toLowerCase() === lowerClean)) {
-    current.push(cleanName);
-    saveFile(SCHOOLS_FILE, current);
-  }
+  await syncRegistry({ schools, deletedSchools });
   return cleanName;
 }
 
@@ -292,29 +316,18 @@ export async function updateSchool(oldName, newName) {
   const lowerOld = cleanOld.toLowerCase();
   const lowerNew = cleanNew.toLowerCase();
 
-  // Remove new name from blacklist
-  let deletedSchools = ensureFile(DELETED_SCHOOLS_FILE, []);
-  if (deletedSchools.some((s) => s.toLowerCase() === lowerNew)) {
-    deletedSchools = deletedSchools.filter((s) => s.toLowerCase() !== lowerNew);
-    saveFile(DELETED_SCHOOLS_FILE, deletedSchools);
-  }
-
-  // Blacklist old name to avoid resurrection from products
-  if (!deletedSchools.some((s) => s.toLowerCase() === lowerOld)) {
+  const registry = await getFullRegistry();
+  let deletedSchools = (registry.deletedSchools || []).filter((s) => s.trim().toLowerCase() !== lowerNew);
+  if (!deletedSchools.some((s) => s.trim().toLowerCase() === lowerOld)) {
     deletedSchools.push(cleanOld);
-    saveFile(DELETED_SCHOOLS_FILE, deletedSchools);
   }
 
-  let current = ensureFile(SCHOOLS_FILE, DEFAULT_SCHOOLS);
-  current = current.filter((s) => s.toLowerCase() !== lowerOld);
-  if (!current.some((s) => s.toLowerCase() === lowerNew)) {
-    current.push(cleanNew);
+  let schools = (registry.schools || []).filter((s) => s.trim().toLowerCase() !== lowerOld);
+  if (!schools.some((s) => s.trim().toLowerCase() === lowerNew)) {
+    schools.push(cleanNew);
   }
 
-  const unique = Array.from(new Set(current));
-  saveFile(SCHOOLS_FILE, unique);
-
-  // Sync rename in Supabase products
+  await syncRegistry({ schools, deletedSchools });
   await renameSchoolInProducts(cleanOld, cleanNew);
 
   return { oldName: cleanOld, newName: cleanNew };
@@ -327,19 +340,15 @@ export async function deleteSchool(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // 1. Add to deleted blacklist so getSchools never restores it
-  let deletedSchools = ensureFile(DELETED_SCHOOLS_FILE, []);
-  if (!deletedSchools.some((s) => s.toLowerCase() === lowerClean)) {
+  const registry = await getFullRegistry();
+  let deletedSchools = registry.deletedSchools || [];
+  if (!deletedSchools.some((s) => s.trim().toLowerCase() === lowerClean)) {
     deletedSchools.push(cleanName);
-    saveFile(DELETED_SCHOOLS_FILE, deletedSchools);
   }
 
-  // 2. Remove from active schools file
-  let current = ensureFile(SCHOOLS_FILE, DEFAULT_SCHOOLS);
-  current = current.filter((s) => s.toLowerCase() !== lowerClean);
-  saveFile(SCHOOLS_FILE, current);
+  let schools = (registry.schools || []).filter((s) => s.trim().toLowerCase() !== lowerClean);
 
-  // 3. Sync delete in Supabase products (reset to 'General School')
+  await syncRegistry({ schools, deletedSchools });
   await deleteSchoolInProducts(cleanName);
 
   return { deleted: cleanName };
@@ -350,13 +359,11 @@ export async function deleteSchool(name) {
 // -------------------------------------------------------------
 
 export async function getClasses() {
-  const fileClasses = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
-  const deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
-  const deletedSet = new Set(deletedClasses.map((c) => String(c).trim().toLowerCase()));
+  const registry = await getFullRegistry();
+  const deletedSet = new Set((registry.deletedClasses || []).map((c) => String(c).trim().toLowerCase()));
 
-  // Start with file classes that haven't been deleted
   const classSet = new Set();
-  fileClasses.forEach((c) => {
+  (registry.classes || []).forEach((c) => {
     if (c && typeof c === 'string') {
       const trimmed = c.trim();
       if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
@@ -364,19 +371,6 @@ export async function getClasses() {
       }
     }
   });
-
-  try {
-    const products = await getProductsFromSupabase();
-    products.forEach((p) => {
-      const cls = p.applicableClass || p.applicable_class;
-      if (cls && typeof cls === 'string' && cls !== 'All Classes') {
-        const trimmed = cls.trim();
-        if (!deletedSet.has(trimmed.toLowerCase())) {
-          classSet.add(trimmed);
-        }
-      }
-    });
-  } catch (e) {}
 
   const result = Array.from(classSet);
   saveFile(CLASSES_FILE, result);
@@ -390,18 +384,12 @@ export async function addClass(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // Remove from deleted blacklist if present
-  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
-  if (deletedClasses.some((c) => c.toLowerCase() === lowerClean)) {
-    deletedClasses = deletedClasses.filter((c) => c.toLowerCase() !== lowerClean);
-    saveFile(DELETED_CLASSES_FILE, deletedClasses);
-  }
+  const registry = await getFullRegistry();
+  let deletedClasses = (registry.deletedClasses || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
+  let classes = (registry.classes || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
+  classes.push(cleanName);
 
-  const current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
-  if (!current.some((c) => c.toLowerCase() === lowerClean)) {
-    current.push(cleanName);
-    saveFile(CLASSES_FILE, current);
-  }
+  await syncRegistry({ classes, deletedClasses });
   return cleanName;
 }
 
@@ -414,29 +402,18 @@ export async function updateClass(oldName, newName) {
   const lowerOld = cleanOld.toLowerCase();
   const lowerNew = cleanNew.toLowerCase();
 
-  // Remove new name from blacklist
-  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
-  if (deletedClasses.some((c) => c.toLowerCase() === lowerNew)) {
-    deletedClasses = deletedClasses.filter((c) => c.toLowerCase() !== lowerNew);
-    saveFile(DELETED_CLASSES_FILE, deletedClasses);
-  }
-
-  // Blacklist old name to avoid resurrection from products
-  if (!deletedClasses.some((c) => c.toLowerCase() === lowerOld)) {
+  const registry = await getFullRegistry();
+  let deletedClasses = (registry.deletedClasses || []).filter((c) => c.trim().toLowerCase() !== lowerNew);
+  if (!deletedClasses.some((c) => c.trim().toLowerCase() === lowerOld)) {
     deletedClasses.push(cleanOld);
-    saveFile(DELETED_CLASSES_FILE, deletedClasses);
   }
 
-  let current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
-  current = current.filter((c) => c.toLowerCase() !== lowerOld);
-  if (!current.some((c) => c.toLowerCase() === lowerNew)) {
-    current.push(cleanNew);
+  let classes = (registry.classes || []).filter((c) => c.trim().toLowerCase() !== lowerOld);
+  if (!classes.some((c) => c.trim().toLowerCase() === lowerNew)) {
+    classes.push(cleanNew);
   }
 
-  const unique = Array.from(new Set(current));
-  saveFile(CLASSES_FILE, unique);
-
-  // Sync rename in Supabase products
+  await syncRegistry({ classes, deletedClasses });
   await renameClassInProducts(cleanOld, cleanNew);
 
   return { oldName: cleanOld, newName: cleanNew };
@@ -449,21 +426,16 @@ export async function deleteClass(name) {
   const cleanName = name.trim();
   const lowerClean = cleanName.toLowerCase();
 
-  // 1. Add to deleted blacklist so getClasses never restores it
-  let deletedClasses = ensureFile(DELETED_CLASSES_FILE, []);
-  if (!deletedClasses.some((c) => c.toLowerCase() === lowerClean)) {
+  const registry = await getFullRegistry();
+  let deletedClasses = registry.deletedClasses || [];
+  if (!deletedClasses.some((c) => c.trim().toLowerCase() === lowerClean)) {
     deletedClasses.push(cleanName);
-    saveFile(DELETED_CLASSES_FILE, deletedClasses);
   }
 
-  // 2. Remove from active classes file
-  let current = ensureFile(CLASSES_FILE, DEFAULT_CLASSES);
-  current = current.filter((c) => c.toLowerCase() !== lowerClean);
-  saveFile(CLASSES_FILE, current);
+  let classes = (registry.classes || []).filter((c) => c.trim().toLowerCase() !== lowerClean);
 
-  // 3. Sync delete in Supabase products (reset to 'All Classes')
+  await syncRegistry({ classes, deletedClasses });
   await deleteClassInProducts(cleanName);
 
   return { deleted: cleanName };
 }
-
