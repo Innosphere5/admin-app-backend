@@ -260,24 +260,47 @@ export async function clearAllProductsFromSupabase() {
  * Rename category across all products in Supabase and memory store
  */
 export async function renameCategoryInProducts(oldName, newName) {
+  if (!oldName || !newName) return { success: true, updatedCount: 0 };
+  const cleanOld = String(oldName).trim().toLowerCase();
+  const cleanNew = String(newName).trim();
+
   memoryStore.forEach((p) => {
-    if (p.category && p.category.toLowerCase() === oldName.toLowerCase()) {
-      p.category = newName;
+    if (p.category && p.category.trim().toLowerCase() === cleanOld) {
+      p.category = cleanNew;
     }
   });
+
   try {
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .update({ category: newName })
-      .ilike('category', oldName)
+      .update({ category: cleanNew })
+      .ilike('category', oldName.trim())
       .select('id, name, category');
+
+    let updatedCount = data?.length || 0;
+
+    const { data: allProds } = await supabase.from(TABLE_NAME).select('id, category');
+    if (Array.isArray(allProds)) {
+      const remainingIds = allProds
+        .filter((p) => p.category && p.category.trim().toLowerCase() === cleanOld && p.category !== cleanNew)
+        .map((p) => p.id);
+
+      if (remainingIds.length > 0) {
+        const { data: updatedRemaining } = await supabase
+          .from(TABLE_NAME)
+          .update({ category: cleanNew })
+          .in('id', remainingIds)
+          .select('id');
+        updatedCount += updatedRemaining?.length || 0;
+      }
+    }
 
     if (error) {
       console.warn('Supabase renameCategory notice:', error.message);
     } else {
-      console.log(`Updated ${data?.length || 0} products from category "${oldName}" to "${newName}"`);
+      console.log(`Updated ${updatedCount} products from category "${oldName}" to "${cleanNew}"`);
     }
-    return { success: !error, updatedCount: data?.length || 0 };
+    return { success: !error, updatedCount };
   } catch (err) {
     console.error('renameCategoryInProducts exception:', err.message);
     return { success: false, error: err.message };
@@ -288,24 +311,46 @@ export async function renameCategoryInProducts(oldName, newName) {
  * Reset deleted category to 'General' across all products in Supabase and memory store
  */
 export async function deleteCategoryInProducts(catName) {
+  if (!catName) return { success: true, updatedCount: 0 };
+  const cleanTarget = String(catName).trim().toLowerCase();
+
   memoryStore.forEach((p) => {
-    if (p.category && p.category.toLowerCase() === catName.toLowerCase()) {
+    if (p.category && p.category.trim().toLowerCase() === cleanTarget) {
       p.category = 'General';
     }
   });
+
   try {
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .update({ category: 'General' })
-      .ilike('category', catName)
+      .ilike('category', catName.trim())
       .select('id, name');
+
+    let updatedCount = data?.length || 0;
+
+    const { data: allProds } = await supabase.from(TABLE_NAME).select('id, category');
+    if (Array.isArray(allProds)) {
+      const remainingIds = allProds
+        .filter((p) => p.category && p.category.trim().toLowerCase() === cleanTarget && p.category !== 'General')
+        .map((p) => p.id);
+
+      if (remainingIds.length > 0) {
+        const { data: updatedRemaining } = await supabase
+          .from(TABLE_NAME)
+          .update({ category: 'General' })
+          .in('id', remainingIds)
+          .select('id');
+        updatedCount += updatedRemaining?.length || 0;
+      }
+    }
 
     if (error) {
       console.warn('Supabase deleteCategory notice:', error.message);
     } else {
-      console.log(`Reset ${data?.length || 0} products from deleted category "${catName}" to "General"`);
+      console.log(`Reset ${updatedCount} products from deleted category "${catName}" to "General"`);
     }
-    return { success: !error, updatedCount: data?.length || 0 };
+    return { success: true, updatedCount };
   } catch (err) {
     console.error('deleteCategoryInProducts exception:', err.message);
     return { success: false, error: err.message };
