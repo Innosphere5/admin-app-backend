@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase.js';
 import { createNotification, broadcastRealtimeEvent } from './notificationService.js';
+import { deductStockForOrder, restoreStockForOrder } from './stockService.js';
 
 const TABLE_NAME = 'orders';
 
@@ -291,6 +292,19 @@ export async function createOrderInSupabase(orderData) {
   // Broadcast real-time order creation to all connected SSE clients
   broadcastRealtimeEvent('order_created', formattedOrder);
 
+  // 🔥 DEDUCT STOCK: Decrease stock_quantity and size_stocks for each ordered product
+  try {
+    const stockResult = await deductStockForOrder(formattedOrder.items);
+    if (stockResult.errors.length > 0) {
+      console.warn('⚠️ Some stock deductions had issues:', stockResult.errors);
+    } else {
+      console.log(`📦 Stock deducted successfully for order ${formattedOrder.orderNumber}:`, 
+        stockResult.updatedProducts.map(p => `${p.name}: ${p.previousStock}→${p.newStock}`).join(', '));
+    }
+  } catch (stockErr) {
+    console.error('❌ Stock deduction failed for order:', stockErr.message);
+  }
+
   // Create unified notification in Supabase & memory
   await createNotification({
     orderId: formattedOrder.id,
@@ -323,6 +337,45 @@ export async function deleteOrderFromSupabase(id) {
   }
   const targetId = String(id).trim();
   const searchKey = targetId.replace('#', '').toLowerCase();
+
+  // Find the order before deleting so we can restore stock if needed
+  let orderToDelete = ordersStore.find(
+    (o) =>
+      String(o.id).toLowerCase() === searchKey ||
+      String(o.id).toLowerCase() === `bs-${searchKey}` ||
+      String(o.orderNumber).replace('#', '').toLowerCase() === searchKey ||
+      String(o.seriesNo) === searchKey ||
+      String(o.rawOrderNumber || '').replace('#', '').toLowerCase() === searchKey
+  );
+
+  if (!orderToDelete) {
+    try {
+      const { data: dbOrder } = await supabase
+        .from(TABLE_NAME)
+        .select('*')
+        .or(`id.eq.${targetId},order_number.eq.${targetId},id.eq.BS-${targetId},order_number.eq.#${targetId}`)
+        .maybeSingle();
+      if (dbOrder) {
+        orderToDelete = mapFromDb(dbOrder);
+      }
+    } catch (e) {}
+  }
+
+  // 🔥 RESTORE STOCK: If the order was pending or accepted, stock was already deducted,
+  // so we need to add it back. Declined/cancelled orders already had stock restored.
+  if (orderToDelete && ['pending', 'accepted'].includes(orderToDelete.status)) {
+    try {
+      const stockResult = await restoreStockForOrder(orderToDelete.items);
+      if (stockResult.errors.length > 0) {
+        console.warn('⚠️ Some stock restorations had issues during order delete:', stockResult.errors);
+      } else {
+        console.log(`♻️ Stock restored for deleted order ${orderToDelete.orderNumber}:`,
+          stockResult.restoredProducts.map(p => `${p.name}: ${p.previousStock}→${p.newStock}`).join(', '));
+      }
+    } catch (stockErr) {
+      console.error('❌ Stock restoration failed during order delete:', stockErr.message);
+    }
+  }
 
   // 1. Remove from in-memory ordersStore
   const beforeLen = ordersStore.length;
@@ -377,11 +430,28 @@ export async function deleteOrderFromSupabase(id) {
  */
 export async function updateOrderStatusInSupabase(id, { status, deliveryTime, adminNotes, declineReason }) {
   const targetId = String(id);
-  const index = ordersStore.findIndex((o) => String(o.id) === targetId || String(o.orderNumber) === targetId);
+  let index = ordersStore.findIndex((o) => String(o.id) === targetId || String(o.orderNumber) === targetId);
+
+  if (index === -1) {
+    try {
+      const { data: dbOrder } = await supabase
+        .from(TABLE_NAME)
+        .select('*')
+        .or(`id.eq.${targetId},order_number.eq.${targetId},id.eq.BS-${targetId},order_number.eq.#${targetId}`)
+        .maybeSingle();
+      if (dbOrder) {
+        const mapped = mapFromDb(dbOrder);
+        ordersStore.unshift(mapped);
+        index = 0;
+      }
+    } catch (e) {}
+  }
 
   let updatedOrder;
+  let previousStatus = 'pending';
   if (index !== -1) {
     const existing = ordersStore[index];
+    previousStatus = existing.status || 'pending';
     updatedOrder = {
       ...existing,
       status: status || existing.status,
@@ -402,6 +472,26 @@ export async function updateOrderStatusInSupabase(id, { status, deliveryTime, ad
       updatedAt: new Date().toISOString()
     };
     ordersStore.unshift(updatedOrder);
+  }
+
+  // 🔥 RESTORE STOCK ON DECLINE: If order is being declined and was previously
+  // pending/accepted (stock was deducted), restore the stock
+  const isDeclined = status === 'declined' || status === 'cancelled';
+  if (isDeclined && ['pending', 'accepted'].includes(previousStatus)) {
+    try {
+      const items = updatedOrder.items || [];
+      if (items.length > 0) {
+        const stockResult = await restoreStockForOrder(items);
+        if (stockResult.errors.length > 0) {
+          console.warn('⚠️ Some stock restorations had issues on decline:', stockResult.errors);
+        } else {
+          console.log(`♻️ Stock restored for declined order ${updatedOrder.orderNumber}:`,
+            stockResult.restoredProducts.map(p => `${p.name}: ${p.previousStock}→${p.newStock}`).join(', '));
+        }
+      }
+    } catch (stockErr) {
+      console.error('❌ Stock restoration failed on order decline:', stockErr.message);
+    }
   }
 
   // Real-time broadcast for live UI synchronization
@@ -435,6 +525,7 @@ export async function updateOrderStatusInSupabase(id, { status, deliveryTime, ad
 
 /**
  * Mark order as completed by user (User tick)
+ * Note: Stock is NOT restored on completion - the items were delivered.
  */
 export async function completeOrderByUser(id) {
   const targetId = String(id);
@@ -489,6 +580,93 @@ export async function completeOrderByUser(id) {
       .eq('id', updatedOrder.id);
   } catch (err) {
     // Silent fallback
+  }
+
+  return updatedOrder;
+}
+
+/**
+ * Cancel order by user (only if pending - before admin accepts).
+ * Restores stock for all items in the cancelled order.
+ */
+export async function cancelOrderByUser(id) {
+  const targetId = String(id);
+  let index = ordersStore.findIndex((o) => String(o.id) === targetId || String(o.orderNumber) === targetId);
+
+  if (index === -1) {
+    try {
+      const { data: dbOrder } = await supabase
+        .from(TABLE_NAME)
+        .select('*')
+        .or(`id.eq.${targetId},order_number.eq.${targetId},id.eq.BS-${targetId},order_number.eq.#${targetId}`)
+        .maybeSingle();
+      if (dbOrder) {
+        const mapped = mapFromDb(dbOrder);
+        ordersStore.unshift(mapped);
+        index = 0;
+      }
+    } catch (e) {}
+  }
+
+  if (index === -1) {
+    throw new Error('Order not found');
+  }
+
+  const existing = ordersStore[index];
+
+  // Only allow cancellation of pending orders
+  if (existing.status !== 'pending') {
+    throw new Error(`Cannot cancel order with status "${existing.status}". Only pending orders can be cancelled.`);
+  }
+
+  const now = new Date().toISOString();
+  const updatedOrder = {
+    ...existing,
+    status: 'cancelled',
+    updatedAt: now
+  };
+  ordersStore[index] = updatedOrder;
+
+  // 🔥 RESTORE STOCK: Add back the stock that was deducted when the order was placed
+  try {
+    const items = updatedOrder.items || [];
+    if (items.length > 0) {
+      const stockResult = await restoreStockForOrder(items);
+      if (stockResult.errors.length > 0) {
+        console.warn('⚠️ Some stock restorations had issues on cancel:', stockResult.errors);
+      } else {
+        console.log(`♻️ Stock restored for cancelled order ${updatedOrder.orderNumber}:`,
+          stockResult.restoredProducts.map(p => `${p.name}: ${p.previousStock}→${p.newStock}`).join(', '));
+      }
+    }
+  } catch (stockErr) {
+    console.error('❌ Stock restoration failed on order cancel:', stockErr.message);
+  }
+
+  // Real-time broadcast
+  broadcastRealtimeEvent('order_updated', updatedOrder);
+
+  // Create cancellation notification
+  await createNotification({
+    orderId: updatedOrder.id,
+    type: 'order_declined',
+    title: '🚫 Order Cancelled by Customer',
+    message: `Order ${updatedOrder.orderNumber || updatedOrder.id} was cancelled by ${updatedOrder.customerName || 'customer'}`,
+    targetRole: 'all',
+    customerMobile: updatedOrder.customerMobile
+  });
+
+  // Update in Supabase
+  try {
+    await supabase
+      .from(TABLE_NAME)
+      .update({
+        status: 'cancelled',
+        updated_at: now
+      })
+      .eq('id', updatedOrder.id);
+  } catch (err) {
+    console.error('Order cancel Supabase update exception:', err.message);
   }
 
   return updatedOrder;

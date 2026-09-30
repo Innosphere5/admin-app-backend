@@ -14,6 +14,7 @@ import {
   createOrderInSupabase,
   updateOrderStatusInSupabase,
   completeOrderByUser,
+  cancelOrderByUser,
   deleteOrderFromSupabase
 } from './services/orderService.js';
 import {
@@ -583,6 +584,25 @@ app.put('/api/orders/:id/complete', async (req, res) => {
   } catch (error) {
     console.error('Error marking order completed:', error);
     res.status(500).json({ success: false, message: 'Failed to complete order' });
+  }
+});
+
+// PUT /api/orders/:id/cancel - Cancel order by user (only pending orders)
+app.put('/api/orders/:id/cancel', async (req, res) => {
+  try {
+    const cancelledOrder = await cancelOrderByUser(req.params.id);
+
+    console.log(`Order ${cancelledOrder.orderNumber || cancelledOrder.id} CANCELLED by customer. Stock restored.`);
+
+    res.json({
+      success: true,
+      message: 'Order cancelled successfully. Stock has been restored.',
+      order: cancelledOrder
+    });
+  } catch (error) {
+    console.error('Error cancelling order:', error);
+    const statusCode = error.message?.includes('Cannot cancel') ? 400 : 500;
+    res.status(statusCode).json({ success: false, message: error.message || 'Failed to cancel order' });
   }
 });
 
