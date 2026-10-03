@@ -1,12 +1,6 @@
 [
-  "Shirt",
-  "Pant",
-  "Skirt",
   "Skirt Divided",
-  "Socks",
   "Tie",
-  "Belt",
-  "T.Shirt",
   "Lower",
   "Track Suit",
   "Sweater",
@@ -14,6 +8,13 @@
   "Coat/Blazer",
   "Jacket",
   "Stocking",
+  "Accessories",
   "Shoes",
-  "Accessories"
+  "Belt",
+  "Bag",
+  "T.Shirt",
+  "Skirt",
+  "Socks",
+  "Shirt",
+  "Pant"
 ]

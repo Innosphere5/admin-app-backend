@@ -222,15 +222,26 @@ export function generateOrderPdf(order) {
       y += 100;
 
       // 6. Terms & Conditions & Footer
-      doc.rect(40, y, doc.page.width - 80, 75).fillAndStroke(lightBg, tableBorder);
+      const terms = [
+        "1. Any return or exchange of the product can be done within 7 days of purchase at our physical store.",
+        "2. Original receipt or invoice is required.",
+        "3. Clothes should be unworn, unwashed and with all original tags unbroken should be there in same condition.",
+        "4. No Guarantee No Claim on any product.",
+        "5. Subject to Bathinda Jurisdiction only.",
+        "6. Visit our physical store: #MCB-Z304654, Dr. Mela Ram Hospital Road, Amrik Singh Road, Bathinda (Punjab) | GSTIN: 03ANXPG2252L1ZS | Ph: +91 98883-88170",
+      ].join('\n');
+      const termsTextX = 48;
+      const termsTextY = y + 17;
+      const termsTextWidth = doc.page.width - 96;
+      doc.font('Helvetica').fontSize(7);
+      const termsTextHeight = doc.heightOfString(terms, { width: termsTextWidth, lineGap: 2 });
+      const termsBoxHeight = termsTextY - y + termsTextHeight + 8;
+
+      doc.rect(40, y, doc.page.width - 80, termsBoxHeight).fillAndStroke(lightBg, tableBorder);
       doc.fillColor(grayText).font('Helvetica-Bold').fontSize(7.5)
         .text("TERMS & CONDITIONS:", 48, y + 6);
       doc.font('Helvetica').fontSize(7).fillColor(grayText)
-        .text("1. Any return or exchange of the product can be done within 7 days of purchase at our store.", 48, y + 17)
-        .text("2. Original receipt or invoice is required.", 48, y + 27)
-        .text("3. Clothes should be unworn, unwashed and with all original tags unbroken should be there in same condition.", 48, y + 37)
-        .text("4. No Guarantee No Claim on any product.", 48, y + 47)
-        .text("5. Subject to Bathinda Jurisdiction only.", 48, y + 57);
+        .text(terms, termsTextX, termsTextY, { width: termsTextWidth, lineGap: 2 });
 
       // Bottom Bar
       doc.rect(0, doc.page.height - 15, doc.page.width, 15).fill(primaryMaroon);
