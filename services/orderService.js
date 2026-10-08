@@ -17,7 +17,7 @@ let ordersStore = [
       address2: 'Near Kali Mata Temple',
       city: 'Bathinda',
       state: 'Punjab',
-      postal: '151001'
+      postal: '151001' 
     },
     school: 'Delhi Public School',
     items: [

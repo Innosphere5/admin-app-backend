@@ -6,7 +6,9 @@ import {
   getProductsFromSupabase,
   addProductToSupabase,
   updateProductInSupabase,
-  deleteProductFromSupabase
+  deleteProductFromSupabase,
+  getShopStatusFromSupabase,
+  saveShopStatusToSupabase
 } from './services/supabaseService.js';
 import {
   getOrdersFromSupabase,
@@ -22,7 +24,8 @@ import {
   createNotification,
   markNotificationRead,
   markAllNotificationsRead,
-  registerSseClient
+  registerSseClient,
+  broadcastRealtimeEvent
 } from './services/notificationService.js';
 import { generateOrderPdf } from './services/pdfService.js';
 import {
@@ -711,6 +714,40 @@ app.post('/api/notifications/read-all', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to mark all notifications read' });
   }
 });
+
+// ==========================================
+// SHOP STATUS & STORE CLOSURE BANNER API
+// ==========================================
+
+// GET /api/shop-status - Retrieve current shop closure and banner configuration
+app.get('/api/shop-status', async (req, res) => {
+  try {
+    const status = await getShopStatusFromSupabase();
+    res.json({ success: true, shopStatus: status });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to retrieve shop status', error: error.message });
+  }
+});
+
+// POST & PUT /api/shop-status - Update shop closure, reopening date, and banner settings
+const handleUpdateShopStatus = async (req, res) => {
+  try {
+    const result = await saveShopStatusToSupabase(req.body);
+    if (result.success) {
+      // Broadcast live event to all connected web visitors and clients via SSE
+      broadcastRealtimeEvent('shop_status_updated', result.shopStatus);
+      res.json({ success: true, shopStatus: result.shopStatus });
+    } else {
+      res.status(400).json({ success: false, message: result.error || 'Failed to update shop status' });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Exception updating shop status', error: error.message });
+  }
+};
+
+app.post('/api/shop-status', handleUpdateShopStatus);
+app.put('/api/shop-status', handleUpdateShopStatus);
+
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`=================================================`);

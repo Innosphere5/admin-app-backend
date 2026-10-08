@@ -596,3 +596,122 @@ export async function saveMasterRegistryToSupabase(registry) {
   }
 }
 
+/**
+ * Helper: Format real calendar date into a user-friendly string (e.g., "Saturday, 10 Oct 2026")
+ */
+export function formatRealDate(dateInput) {
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Generate default shop status object (2 days closed by default)
+ */
+export function getDefaultShopStatus() {
+  const now = new Date();
+  const reopen = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+  const formatted = formatRealDate(reopen);
+
+  return {
+    isClosed: false,
+    closureDays: 2,
+    startDate: now.toISOString(),
+    reopenDate: reopen.toISOString(),
+    reopenDateFormatted: formatted,
+    bannerTitle: 'Shop Temporarily Closed for 2 Days',
+    bannerMessage: `Our shop is closed for 2 days. We will reopen on ${formatted}. Online orders placed now will be processed as soon as we reopen!`,
+    allowOrders: true,
+    showPopup: true,
+    showTopBanner: true,
+    updatedAt: now.toISOString()
+  };
+}
+
+/**
+ * Retrieve shop status and closure banner settings from Supabase
+ */
+export async function getShopStatusFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('message, created_at')
+      .eq('id', 'sys_shop_status')
+      .maybeSingle();
+
+    if (!error && data && data.message) {
+      const parsed = JSON.parse(data.message);
+      if (parsed && typeof parsed === 'object') {
+        // Ensure reopenDateFormatted is present and accurate
+        if (parsed.reopenDate && !parsed.reopenDateFormatted) {
+          parsed.reopenDateFormatted = formatRealDate(parsed.reopenDate);
+        }
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase getShopStatus notice:', err.message);
+  }
+  return getDefaultShopStatus();
+}
+
+/**
+ * Persist shop status and closure banner settings to Supabase
+ */
+export async function saveShopStatusToSupabase(statusData) {
+  try {
+    const current = await getShopStatusFromSupabase();
+    const updated = {
+      ...current,
+      ...statusData,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Calculate/ensure real date string
+    if (updated.reopenDate) {
+      updated.reopenDateFormatted = formatRealDate(updated.reopenDate);
+    } else if (updated.closureDays) {
+      const start = updated.startDate ? new Date(updated.startDate) : new Date();
+      const reopen = new Date(start.getTime() + Number(updated.closureDays) * 24 * 60 * 60 * 1000);
+      updated.reopenDate = reopen.toISOString();
+      updated.reopenDateFormatted = formatRealDate(reopen);
+    }
+
+    const payload = {
+      id: 'sys_shop_status',
+      order_id: 'SYSTEM',
+      type: 'shop_status',
+      title: 'Shop Status & Closure Banner',
+      message: JSON.stringify(updated),
+      target_role: 'all',
+      read: true,
+      created_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('notifications')
+      .upsert([payload], { onConflict: 'id' });
+
+    if (error) {
+      console.warn('Supabase saveShopStatus notice:', error.message);
+      return { success: false, error: error.message };
+    }
+
+    console.log('✅ Shop status & closure banner successfully synced to Supabase database');
+    return { success: true, shopStatus: updated };
+  } catch (err) {
+    console.error('saveShopStatusToSupabase exception:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+
