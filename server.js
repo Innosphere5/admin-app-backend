@@ -501,6 +501,15 @@ app.post('/api/orders', async (req, res) => {
       });
     }
 
+    // Verify if delivery orders are closed by admin
+    const shopStatus = await getShopStatusFromSupabase();
+    if (shopStatus && (shopStatus.deliveryOrdersClosed || shopStatus.isClosed || shopStatus.allowOrders === false)) {
+      return res.status(403).json({
+        success: false,
+        message: 'We are currently not processing any online orders, Please revisit our website after a few business days.'
+      });
+    }
+
     const calculatedSubtotal = Number(req.body.subtotal ?? items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0));
     if (calculatedSubtotal < 500) {
       return res.status(400).json({

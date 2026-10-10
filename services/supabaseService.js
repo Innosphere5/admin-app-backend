@@ -26,6 +26,23 @@ function cleanImageUrl(url) {
 }
 
 /**
+ * Compute stock status according to business rules:
+ * - Stock <= 0 or inStock === false -> 'Out of Stock'
+ * - Stock === 1 -> 'Low Stock'
+ * - Stock >= 2 -> 'In Stock'
+ */
+export function computeStockStatus(stockQuantity, inStock = true) {
+  const stock = Number(stockQuantity ?? 0);
+  if (stock <= 0 || inStock === false) {
+    return 'Out of Stock';
+  }
+  if (stock === 1) {
+    return 'Low Stock';
+  }
+  return 'In Stock';
+}
+
+/**
  * Format DB row to Product Object
  */
 function mapFromDb(row) {
@@ -42,6 +59,9 @@ function mapFromDb(row) {
     else category = 'Accessories';
   }
 
+  const isInStock = stock > 0 && row.in_stock !== false;
+  const stockStatus = computeStockStatus(stock, isInStock);
+
   return {
     id: row.id,
     name: row.name,
@@ -57,8 +77,9 @@ function mapFromDb(row) {
     sizesText: row.sizes_text || row.sizesText || 'Multiple Sizes',
     sizePrices: row.size_prices ? (typeof row.size_prices === 'string' ? JSON.parse(row.size_prices) : row.size_prices) : {},
     sizeStocks: row.size_stocks ? (typeof row.size_stocks === 'string' ? JSON.parse(row.size_stocks) : row.size_stocks) : (row.sizeStocks || {}),
-    inStock: stock > 0 && row.in_stock !== false,
+    inStock: isInStock,
     stockQuantity: stock,
+    stockStatus,
     createdAt: row.created_at || new Date().toISOString()
   };
 }
@@ -130,6 +151,7 @@ export async function getProductsFromSupabase() {
  */
 export async function addProductToSupabase(productData) {
   const stock = Number(productData.stockQuantity ?? 50);
+  const isInStock = stock > 0;
   const formattedProduct = {
     id: productData.id || `prod-${Date.now()}`,
     name: productData.name || 'New Uniform Product',
@@ -145,8 +167,9 @@ export async function addProductToSupabase(productData) {
     sizesText: productData.sizesText || (Array.isArray(productData.sizes) ? `Sizes: ${productData.sizes.join(', ')}` : 'Multiple Sizes'),
     sizePrices: productData.sizePrices || {},
     sizeStocks: productData.sizeStocks || {},
-    inStock: stock > 0,
+    inStock: isInStock,
     stockQuantity: stock,
+    stockStatus: computeStockStatus(stock, isInStock),
     createdAt: new Date().toISOString()
   };
 
@@ -181,6 +204,7 @@ export async function updateProductInSupabase(id, updateData) {
   if (index !== -1) {
     const existing = memoryStore[index];
     const newStock = updateData.stockQuantity !== undefined ? Number(updateData.stockQuantity) : existing.stockQuantity;
+    const isInStock = newStock > 0;
 
     updatedItem = {
       ...existing,
@@ -188,7 +212,8 @@ export async function updateProductInSupabase(id, updateData) {
       id: targetId,
       basePrice: updateData.basePrice !== undefined ? Number(updateData.basePrice) : existing.basePrice,
       stockQuantity: newStock,
-      inStock: newStock > 0,
+      inStock: isInStock,
+      stockStatus: computeStockStatus(newStock, isInStock),
       sizes: Array.isArray(updateData.sizes) ? updateData.sizes : existing.sizes,
       sizesText: updateData.sizesText || (Array.isArray(updateData.sizes) ? `Sizes: ${updateData.sizes.join(', ')}` : existing.sizesText),
       sizePrices: updateData.sizePrices !== undefined ? updateData.sizePrices : existing.sizePrices,
@@ -196,8 +221,13 @@ export async function updateProductInSupabase(id, updateData) {
     };
     memoryStore[index] = updatedItem;
   } else {
+    const newStock = updateData.stockQuantity !== undefined ? Number(updateData.stockQuantity) : 50;
+    const isInStock = newStock > 0;
     updatedItem = {
       id: targetId,
+      stockQuantity: newStock,
+      inStock: isInStock,
+      stockStatus: computeStockStatus(newStock, isInStock),
       ...updateData,
     };
     memoryStore.unshift(updatedItem);
@@ -624,12 +654,13 @@ export function getDefaultShopStatus() {
 
   return {
     isClosed: false,
+    deliveryOrdersClosed: false,
     closureDays: 2,
     startDate: now.toISOString(),
     reopenDate: reopen.toISOString(),
     reopenDateFormatted: formatted,
     bannerTitle: 'Shop Temporarily Closed for 2 Days',
-    bannerMessage: `Our shop is closed for 2 days. We will reopen on ${formatted}. Online orders placed now will be processed as soon as we reopen!`,
+    bannerMessage: `We are currently not processing any online orders, Please revisit our website after a few business days.`,
     allowOrders: true,
     showPopup: true,
     showTopBanner: true,
