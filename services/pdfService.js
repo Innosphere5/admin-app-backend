@@ -221,14 +221,13 @@ export function generateOrderPdf(order) {
 
       y += 100;
 
-      // 6. Terms & Conditions & Footer
+      // 6. Terms & Conditions (Line 6 removed as requested)
       const terms = [
         "1. Any return or exchange of the product can be done within 7 days of purchase at our physical store.",
         "2. Original receipt or invoice is required.",
         "3. Clothes should be unworn, unwashed and with all original tags unbroken should be there in same condition.",
         "4. No Guarantee No Claim on any product.",
         "5. Subject to Bathinda Jurisdiction only.",
-        "6. Visit our physical store: #MCB-Z304654, Dr. Mela Ram Hospital Road, Amrik Singh Road, Bathinda (Punjab) | GSTIN: 03ANXPG2252L1ZS | Ph: +91 98883-88170",
       ].join('\n');
       const termsTextX = 48;
       const termsTextY = y + 17;
@@ -243,7 +242,30 @@ export function generateOrderPdf(order) {
       doc.font('Helvetica').fontSize(7).fillColor(grayText)
         .text(terms, termsTextX, termsTextY, { width: termsTextWidth, lineGap: 2 });
 
-      // Bottom Bar
+      // Ensure footer elements do not trigger an unintended page break
+      doc.page.margins.bottom = 0;
+
+      // 7. Store Address Footer with Location Pin Icon (at bottom of PDF, outside Terms & Conditions)
+      const footerY = doc.page.height - 58;
+      doc.rect(40, footerY - 4, doc.page.width - 80, 36).fillAndStroke(lightBg, tableBorder);
+
+      // Vector Location Pin Icon
+      doc.save();
+      doc.translate(50, footerY + 4);
+      doc.scale(0.7);
+      doc.path('M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z')
+        .fill(primaryMaroon);
+      doc.restore();
+
+      // Store Address Information
+      doc.fillColor(primaryMaroon).font('Helvetica-Bold').fontSize(8)
+        .text("STORE LOCATION & OUTLET ADDRESS", 72, footerY + 3);
+      doc.fillColor(darkText).font('Helvetica').fontSize(7.5)
+        .text("#MCB-Z304654, Dr. Mela Ram Hospital Road, Amrik Singh Road, Bathinda (Punjab) - 151001", 72, footerY + 14);
+      doc.fillColor(grayText).font('Helvetica').fontSize(7)
+        .text("GSTIN: 03ANXPG2252L1ZS  |  Ph: +91 98883-88170  |  Web: bsmartdresses.com", 72, footerY + 24);
+
+      // Bottom Brand Bar
       doc.rect(0, doc.page.height - 15, doc.page.width, 15).fill(primaryMaroon);
       doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(7)
         .text("B'SMART DRESSES BATHINDA  •  OFFICIAL ORDER DOCUMENTATION", 0, doc.page.height - 11, { align: 'center', width: doc.page.width });
