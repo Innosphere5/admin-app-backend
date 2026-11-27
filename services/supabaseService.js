@@ -680,11 +680,24 @@ export async function getShopStatusFromSupabase() {
       .maybeSingle();
 
     if (!error && data && data.message) {
-      const parsed = JSON.parse(data.message);
+      const parsed = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
       if (parsed && typeof parsed === 'object') {
-        // Ensure reopenDateFormatted is present and accurate
-        if (parsed.reopenDate && !parsed.reopenDateFormatted) {
-          parsed.reopenDateFormatted = formatRealDate(parsed.reopenDate);
+        // If reopenDate is in the past, closure has naturally expired
+        if (parsed.reopenDate) {
+          const reopenTime = new Date(parsed.reopenDate).getTime();
+          if (!isNaN(reopenTime) && reopenTime <= Date.now()) {
+            parsed.isClosed = false;
+            parsed.deliveryOrdersClosed = false;
+            parsed.allowOrders = true;
+            parsed.isExpired = true;
+          }
+          if (!parsed.reopenDateFormatted) {
+            parsed.reopenDateFormatted = formatRealDate(parsed.reopenDate);
+          }
+        }
+        if (parsed.isClosed === false) {
+          parsed.deliveryOrdersClosed = false;
+          parsed.allowOrders = true;
         }
         return parsed;
       }
@@ -700,21 +713,58 @@ export async function getShopStatusFromSupabase() {
  */
 export async function saveShopStatusToSupabase(statusData) {
   try {
-    const current = await getShopStatusFromSupabase();
+    // Read raw current row from DB to check optimistic updatedAt timestamp
+    const { data: existingRow } = await supabase
+      .from('notifications')
+      .select('message')
+      .eq('id', 'sys_shop_status')
+      .maybeSingle();
+
+    let current = getDefaultShopStatus();
+    if (existingRow?.message) {
+      try {
+        const parsedRow = typeof existingRow.message === 'string'
+          ? JSON.parse(existingRow.message)
+          : existingRow.message;
+        if (parsedRow && typeof parsedRow === 'object') current = parsedRow;
+      } catch (e) {}
+    }
+
+    // Optimistic concurrency guard: ignore out-of-order stale mirror writes
+    const currentTs = current?.updatedAt ? new Date(current.updatedAt).getTime() : 0;
+    const incomingTs = statusData?.updatedAt ? new Date(statusData.updatedAt).getTime() : 0;
+    if (incomingTs && currentTs && incomingTs < currentTs) {
+      return { success: true, shopStatus: current, staleIgnored: true };
+    }
+
+    let effStartDate = statusData.startDate || current.startDate;
+    if (!effStartDate || new Date(effStartDate).getTime() < Date.now() - 24 * 60 * 60 * 1000) {
+      effStartDate = new Date().toISOString();
+    }
+
     const updated = {
       ...current,
       ...statusData,
-      updatedAt: new Date().toISOString()
+      startDate: effStartDate,
+      updatedAt: statusData.updatedAt || new Date().toISOString()
     };
+    delete updated.isExpired;
 
-    // Calculate/ensure real date string
-    if (updated.reopenDate) {
-      updated.reopenDateFormatted = formatRealDate(updated.reopenDate);
-    } else if (updated.closureDays) {
-      const start = updated.startDate ? new Date(updated.startDate) : new Date();
-      const reopen = new Date(start.getTime() + Number(updated.closureDays) * 24 * 60 * 60 * 1000);
-      updated.reopenDate = reopen.toISOString();
-      updated.reopenDateFormatted = formatRealDate(reopen);
+    if (updated.isClosed === false) {
+      updated.deliveryOrdersClosed = false;
+      updated.allowOrders = true;
+    } else if (updated.isClosed) {
+      if (statusData.reopenDate) {
+        updated.reopenDate = statusData.reopenDate;
+        updated.reopenDateFormatted = formatRealDate(statusData.reopenDate);
+      } else {
+        const days = Math.max(1, Number(updated.closureDays) || 2);
+        const start = new Date(effStartDate);
+        const reopen = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+        updated.closureDays = days;
+        updated.reopenDate = reopen.toISOString();
+        updated.reopenDateFormatted = formatRealDate(reopen);
+      }
     }
 
     const payload = {

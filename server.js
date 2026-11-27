@@ -731,6 +731,7 @@ app.post('/api/notifications/read-all', async (req, res) => {
 // GET /api/shop-status - Retrieve current shop closure and banner configuration
 app.get('/api/shop-status', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const status = await getShopStatusFromSupabase();
     res.json({ success: true, shopStatus: status });
   } catch (error) {
@@ -741,10 +742,13 @@ app.get('/api/shop-status', async (req, res) => {
 // POST & PUT /api/shop-status - Update shop closure, reopening date, and banner settings
 const handleUpdateShopStatus = async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const result = await saveShopStatusToSupabase(req.body);
     if (result.success) {
-      // Broadcast live event to all connected web visitors and clients via SSE
-      broadcastRealtimeEvent('shop_status_updated', result.shopStatus);
+      // Broadcast live event to all connected web visitors and clients via SSE if not a stale ignore
+      if (!result.staleIgnored) {
+        broadcastRealtimeEvent('shop_status_updated', result.shopStatus);
+      }
       res.json({ success: true, shopStatus: result.shopStatus });
     } else {
       res.status(400).json({ success: false, message: result.error || 'Failed to update shop status' });
